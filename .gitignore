@@ -1,0 +1,24 @@
+# ── Données patient — NE JAMAIS VERSIONNER ───────────────────────────────────
+data/
+*.xlsx
+*.csv
+*.sav
+*.dta
+*.xls
+
+# ── Sorties régénérables ──────────────────────────────────────────────────────
+figures/
+results/
+*.pdf
+*.png
+rapport.html
+
+# ── Fichiers R temporaires ────────────────────────────────────────────────────
+.Rhistory
+.RData
+.Rproj.user/
+renv/
+# Note : *.Rproj est versionné (paramètres RStudio utiles pour la reproductibilité)
+
+# ── Fichiers Mac ──────────────────────────────────────────────────────────────
+.DS_Store
