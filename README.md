@@ -30,7 +30,6 @@ le test de Hosmer-Lemeshow. Les résultats sont exprimés en odds ratios ajusté
 NB : Toutes les analyses ont été réalisées sous R version 4.5.2.
 
 
-
 ## Structure
 
 ```
@@ -61,3 +60,29 @@ source("/Users/kouadio/Desktop/DOSSIERS BUREAU/ENSEMBLE_FONCTIONS/charger_foncti
 ## Note confidentialité
 
 Les données (`data/`) ne sont pas versionnées (données patient — exclus via `.gitignore`).
+
+
+## Contraintes techniques
+
+- **XQuartz requis sur macOS** : nécessaire pour le package `flextable` -> installer depuis [xquartz.org](https://www.xquartz.org)
+- **Données manquantes** : < 5% sur toutes les variables -> exclusion listwise retenue (pas d'imputation)
+- **renv** : environnement figé sous R 4.5.2 — lancer `renv::restore()` avant toute analyse
+
+## Reproduire les analyses
+
+### 1. Restaurer l'environnement
+```r
+renv::restore()
+```
+
+### 2. Ordre d'exécution
+```r
+source("R/load_functions.R")      # bibliothèque personnelle de fonctions
+source("R/data_management.R")     # import, nettoyage, recodage
+source("R/statistical_models.R")  # modèles statistiques
+source("R/survival_analysis.R")   # analyses de survie
+source("R/visualization.R")       # figures et graphiques
+```
+
+### 3. Résultats
+Les exports (tableaux Word, figures) se trouvent dans outputs/
