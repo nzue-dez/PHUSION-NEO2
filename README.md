@@ -36,12 +36,13 @@ NB : Toutes les analyses ont été réalisées sous R version 4.5.2.
 PHUSION NEO2/
 ├── R/
 │   ├── load_functions.R      # Packages + bibliothèque personnelle
-│   ├── data_management.R     # Import, nettoyage, recodage        [Étape 2]
-│   ├── descriptive.R         # Tableaux descriptifs et comparatifs [Étape 3]
-│   ├── missing_analysis.R    # Analyse des données manquantes      [Étape 4]
-│   ├── statistical_models.R  # Tous les modèles (logistique, Cox…) [Étapes 7-8]
-│   ├── model_diagnostics.R   # Diagnostics des modèles             [Étape 9]
-│   └── visualization.R       # Figures finales pour publication     [Étape 10]
+│   ├── data_management.R     # Import, nettoyage, recodage, variable dépendante         [Étape 2]
+│   ├── descriptive.R         # Tableau 1 (population générale), Tableaux 2-3 (périodes) [Étape 3]
+│   ├── missing_analysis.R    # Taux de manquants, patterns, mécanisme (MAR/MCAR/MNAR)   [Étapes 4-5]
+│   │                         # → Étape 5 : imputation non nécessaire (manquants < 5%)
+│   ├── statistical_models.R  # Colinéarité, analyse univariée, modèle multivarié        [Étapes 6-7-8]
+│   ├── model_diagnostics.R   # Hosmer-Lemeshow, résidus, VIF, courbe ROC                [Étape 9]
+│   └── visualization.R       # Figures finales pour publication                          [Étape 10]
 ├── data/
 │   ├── raw/                  # Données brutes (non versionnées)
 │   └── processed/            # Données nettoyées (non versionnées)
@@ -79,12 +80,12 @@ renv::restore()
 ### 2. Ordre d'exécution
 ```r
 source("R/load_functions.R")      # bibliothèque personnelle de fonctions
-source("R/data_management.R")     # import, nettoyage, recodage
-source("R/descriptive.R")         # tableaux descriptifs et comparatifs
-source("R/missing_analysis.R")    # analyse des données manquantes
-source("R/statistical_models.R")  # modèles statistiques
-source("R/model_diagnostics.R")   # diagnostics des modèles
-source("R/visualization.R")       # figures finales
+source("R/data_management.R")     # [Étape 2]   import, nettoyage, recodage, variable dépendante
+source("R/descriptive.R")         # [Étape 3]   tableaux descriptifs et comparatifs
+source("R/missing_analysis.R")    # [Étapes 4-5] analyse manquants + décision stratégie
+source("R/statistical_models.R")  # [Étapes 6-8] colinéarité, univarié, modèle multivarié
+source("R/model_diagnostics.R")   # [Étape 9]   diagnostics du modèle
+source("R/visualization.R")       # [Étape 10]  figures finales pour publication
 ```
 
 ### 3. Reproduction complète en 2 commandes
