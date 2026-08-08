@@ -6,14 +6,14 @@
 data <- readxl::read_excel(here("data/raw/donnees_phuneo.xlsx"))
 
 # Dimension de la base
-Message <- sprintf("La base contient %d variables dans notre base", dim(df1)[2])
+Message <- sprintf("La base contient %d variables dans notre base", dim(data)[2])
 cat(Message)
 
 # Visualisation des variables 
 colnames(data)
 
 # Visualisation de la base
-view(data)
+# view(data)
 
 # On écarte de l'étude ces trois variables non déterminantes 
 data <- data %>% select(-TERME_JOURS,-TERME_SEM)
@@ -167,7 +167,7 @@ dic_vars <- dic_vars %>%
   tab_options(row.striping.background_color = "#F7F7F7")
 
 # Enregistrement du dictionnaire
-gtsave(dic_vars, "figures/dictionnaire_variables.html") 
+gtsave(dic_vars, "results/dictionnaire_variables.html") 
 
 
 # vecteur de variables
@@ -302,5 +302,16 @@ df1 <- df1 |> mutate(grp_term_cal = cut(
 ))
 
 
-# Export données nettoyées ------------------------------------------------
-# saveRDS(donnes_clean, here("data/processed/donnes_clean.rds"))
+# Construction de la variable dépendante: survie sans DBP à 36 SA (Surv_without_dbp36sa)
+# Si dec_ou_dbp_36sa = Non => Surv_without_dbp36sa = Oui; Si dec_ou_dbp_36sa = Oui => Surv_without_dbp36sa = Non;
+df1 <- df1 %>%
+  mutate(
+    Surv_without_dbp36sa = case_when(
+      dec_ou_dbp_36sa == "Non" ~ "Oui",
+      dec_ou_dbp_36sa == "Oui" ~ "Non",
+      TRUE ~ dec_ou_dbp_36sa
+    )
+  )
+
+# On utilise une version qualitative chiffrée pour faciliter son intégration dans des modèles
+df1$Surv_without_dbp36sa <- factor(df1$Surv_without_dbp36sa, levels = c("Non","Oui"), labels = c("0","1"))

@@ -36,11 +36,12 @@ NB : Toutes les analyses ont été réalisées sous R version 4.5.2.
 PHUSION NEO2/
 ├── R/
 │   ├── load_functions.R      # Packages + bibliothèque personnelle
-│   ├── data_management.R     # Import, nettoyage, recodage
-│   ├── statistical_models.R  # Modèles statistiques
-│   ├── bayesian_models.R     # Modèles bayésiens
-│   ├── survival_analysis.R   # Analyse de survie
-│   └── visualization.R       # Graphiques
+│   ├── data_management.R     # Import, nettoyage, recodage        [Étape 2]
+│   ├── descriptive.R         # Tableaux descriptifs et comparatifs [Étape 3]
+│   ├── missing_analysis.R    # Analyse des données manquantes      [Étape 4]
+│   ├── statistical_models.R  # Tous les modèles (logistique, Cox…) [Étapes 7-8]
+│   ├── model_diagnostics.R   # Diagnostics des modèles             [Étape 9]
+│   └── visualization.R       # Figures finales pour publication     [Étape 10]
 ├── data/
 │   ├── raw/                  # Données brutes (non versionnées)
 │   └── processed/            # Données nettoyées (non versionnées)
@@ -79,10 +80,18 @@ renv::restore()
 ```r
 source("R/load_functions.R")      # bibliothèque personnelle de fonctions
 source("R/data_management.R")     # import, nettoyage, recodage
+source("R/descriptive.R")         # tableaux descriptifs et comparatifs
+source("R/missing_analysis.R")    # analyse des données manquantes
 source("R/statistical_models.R")  # modèles statistiques
-source("R/survival_analysis.R")   # analyses de survie
-source("R/visualization.R")       # figures et graphiques
+source("R/model_diagnostics.R")   # diagnostics des modèles
+source("R/visualization.R")       # figures finales
 ```
 
-### 3. Résultats
-Les exports (tableaux Word, figures) se trouvent dans outputs/
+### 3. Reproduction complète en 2 commandes
+```r
+renv::restore()     # installe tous les packages figés
+source("analyse.R") # lance toute l'analyse dans l'ordre
+```
+
+### 4. Résultats
+Les exports (tableaux Word, figures) se trouvent dans `results/`
