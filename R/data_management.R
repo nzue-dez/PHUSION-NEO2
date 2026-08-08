@@ -1,7 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# data_management.R
+# data_management.R — Étape 2
+# Import, contrôle qualité, nettoyage, recodage et construction de la variable dépendante
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Import ------------------------------------------------------------------
 # Import de la base
 data <- readxl::read_excel(here("data/raw/donnees_phuneo.xlsx"))
 
@@ -219,6 +221,13 @@ colnames(df1)[2:37] <- c("date_naiss",
                          "somcu_int",
                          "somcu_vni",
                          "cortisol_n")
+
+
+# Contrôle qualité --------------------------------------------------------
+# plot_range_check()      : détection des valeurs aberrantes (variables quantitatives)
+# check_dominance_qual()  : détection des classes déséquilibrées (variables qualitatives)
+# plot_range_check(df1)
+# check_dominance_qual(df1)
 
 
 # Recherche des valeurs "DM" et "NA" dans la base. (À ce stade, les "NA" ne sont pas encore reconnus par le logiciel comme étant des données manquantes; DM représente, en fait, des données manquantes)
