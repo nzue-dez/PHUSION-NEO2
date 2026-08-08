@@ -36,7 +36,7 @@ NB : Toutes les analyses ont été réalisées sous R version 4.5.2.
 PHUSION NEO2/
 ├── R/
 │   ├── load_functions.R      # Packages + bibliothèque personnelle
-│   ├── data_management.R     # Import, nettoyage, recodage, variable dépendante         [Étape 2]
+│   ├── data_management.R     # Import, contrôle qualité, nettoyage, recodage, variable dépendante  [Étape 2]
 │   ├── descriptive.R         # Tableau 1 (population générale), Tableaux 2-3 (périodes) [Étape 3]
 │   ├── missing_analysis.R    # Taux de manquants, patterns, mécanisme (MAR/MCAR/MNAR)   [Étapes 4-5]
 │   │                         # → Étape 5 : imputation non nécessaire (manquants < 5%)
@@ -80,7 +80,7 @@ renv::restore()
 ### 2. Ordre d'exécution
 ```r
 source("R/load_functions.R")      # bibliothèque personnelle de fonctions
-source("R/data_management.R")     # [Étape 2]   import, nettoyage, recodage, variable dépendante
+source("R/data_management.R")     # [Étape 2]   import, contrôle qualité, nettoyage, recodage, variable dépendante
 source("R/descriptive.R")         # [Étape 3]   tableaux descriptifs et comparatifs
 source("R/missing_analysis.R")    # [Étapes 4-5] analyse manquants + décision stratégie
 source("R/statistical_models.R")  # [Étapes 6-8] colinéarité, univarié, modèle multivarié
