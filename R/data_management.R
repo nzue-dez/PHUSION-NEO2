@@ -10,7 +10,7 @@ Message <- sprintf("La base contient %d variables dans notre base", dim(data)[2]
 cat(Message)
 
 # Visualisation des variables 
-colnames(data)
+# colnames(data)
 
 # Visualisation de la base
 # view(data)
@@ -315,3 +315,40 @@ df1 <- df1 %>%
 
 # On utilise une version qualitative chiffrée pour faciliter son intégration dans des modèles
 df1$Surv_without_dbp36sa <- factor(df1$Surv_without_dbp36sa, levels = c("Non","Oui"), labels = c("0","1"))
+
+# --------------------------------------------------------- contrôle de qualité ---------------------------------------------
+## Variables qualitatives
+check_equilib_qual1 <- check_dominance_qual(df1, vars = vars_qual1, ncol = 3, png_path = "results/check_equilib_qual1.png")
+check_equilib_qual2 <- check_dominance_qual(df1, vars = vars_qual2, ncol = 3, png_path = "results/check_equilib_qual2.png")
+check_equilib_qual3 <- check_dominance_qual(df1, vars = vars_qual3, ncol = 3, png_path = "results/check_equilib_qual3.png")
+
+
+# Commentaire (variables qualitatives) :
+# Toutes les variables qualitatives présentent une distribution équilibrée (seuil 95%),
+# à l'exception de deux variables présentant une dominance détectée :
+#   - pneu_tho  (pneumothorax)       : modalité "Non" dominante (~98%) — événement rare
+#   - chir_lser (chirurgie laser)    : modalité "Non" dominante (~97%) — événement rare
+# → Ces deux variables seront conservées dans l'analyse mais interprétées avec prudence
+#   en raison de leur manque de variabilité (effectifs très faibles dans la modalité "Oui").
+
+
+## Variables quantitatives
+check_vars_quant_value1 <- plot_range_check(df1, vars = vars_quant1, ncol = 3, png_path = "results/check_vars_quant_value1.png")
+check_vars_quant_value2 <- plot_range_check(df1, vars = vars_quant2, ncol = 3, png_path = "results/check_vars_quant_value2.png")
+check_vars_quant_value3 <- plot_range_check(df1, vars = vars_quant3, ncol = 3, png_path = "results/check_vars_quant_value3.png")
+
+
+# Commentaire:
+# On a détecté quelques observations avec des valeurs assez écartées de la plage majoritaire.
+
+# Liste des variables pour lesquelles il y aurait des valeurs potentiellement aberrantes et/ou atypiques
+unique(check_vars_quant_value2$outliers_table$variable)
+
+# View pour "somcu_int" (les observations sont; )
+View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_int"))
+
+# View pour "somcu_vni"  (les observations sont; )
+View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_vni"))
+
+# View pour "cortico_gene_doz"  (les observations sont; )
+View(subset(check_vars_quant_value2$outliers_table,variable == "cortico_gene_doz"))
