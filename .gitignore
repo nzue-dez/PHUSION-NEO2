@@ -22,3 +22,4 @@ renv/
 
 # ── Fichiers Mac ──────────────────────────────────────────────────────────────
 .DS_Store
+R/survival_analysis.R
