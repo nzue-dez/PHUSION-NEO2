@@ -7,6 +7,7 @@
 source("/Users/kouadio/Desktop/DOSSIERS BUREAU/ENSEMBLE_FONCTIONS/charger_fonctions.R")
 
 # Packages du projet
+library(broom)
 library(gtsummary)
 library(tidyverse)
 library(here)
