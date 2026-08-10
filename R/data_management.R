@@ -329,6 +329,7 @@ df1$Surv_without_dbp36sa <- factor(df1$Surv_without_dbp36sa, levels = c("Non","O
 vars_qual1 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","prmloc")
 vars_qual2 = c("dec_ou_dbp_36sa","dec_36sa","dbp_36sa","cortico_tard","pneu_tho","hemo_pulm",
                "hiv_plus_lpmv","cnl_ttt","ca_opr","noso","ecun","perfo_isl","dec_s","chir_lser")
+vars_qual3 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","periode")
 
 ## Variables qualitatives
 check_equilib_qual1 <- check_dominance_qual(df1, vars = vars_qual1, ncol = 3, png_path = "results/check_equilib_qual1.png")
@@ -348,6 +349,7 @@ check_equilib_qual3 <- check_dominance_qual(df1, vars = vars_qual3, ncol = 3, pn
 
 vars_quant1 = c("term_cal","pd_n","crib")
 vars_quant2 = c("somcu_int","somcu_vni","cortico_gene_doz")
+vars_quant3 = c("term_cal","pd_n","crib")
 
 ## Variables quantitatives
 check_vars_quant_value1 <- plot_range_check(df1, vars = vars_quant1, ncol = 3, png_path = "results/check_vars_quant_value1.png")
@@ -362,10 +364,10 @@ check_vars_quant_value3 <- plot_range_check(df1, vars = vars_quant3, ncol = 3, p
 unique(check_vars_quant_value2$outliers_table$variable)
 
 # View pour "somcu_int" (les observations sont; )
-View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_int"))
+# View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_int"))
 
 # View pour "somcu_vni"  (les observations sont; )
-View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_vni"))
+# View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_vni"))
 
 # View pour "cortico_gene_doz"  (les observations sont; )
-View(subset(check_vars_quant_value2$outliers_table,variable == "cortico_gene_doz"))
+# View(subset(check_vars_quant_value2$outliers_table,variable == "cortico_gene_doz"))
