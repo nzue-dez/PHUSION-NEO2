@@ -1,0 +1,898 @@
+---
+title: "Export & Tableaux Word"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX — 05_export.Rmd
+# =============================================================================
+#
+# EXPORT VERS WORD
+#   table_to_word              — Exporter un data.frame en tableau Word
+#   export_estimates_table     — Tableau d'estimations (OR, IC, p-value) → Word
+#   export_decisionnel_logistique — Tableau décisionnel logistique → Word (GT)
+#   export_bootstrap_logistic  — OR bootstrap → Word (flextable)
+# =============================================================================
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (11)
+##########################################################################################################################
+#/ Cette fonction prend en entrée une matrice de données et bien d'autres paramètres et fournit un tableau de résumé statistique avec comparaison de moyenne ou distribution centrale ou médiane pour les variables quantitatives
+#/ et pour les proportions pour les variables qualitatives.
+# Description des arguments ou paramètres de la fonction:
+#/ - df: matrice de données.
+#/ - group_var: la variable qualitative de groupe.
+#/ - quant_vars: Choix des variables quantitatives (de la matrice de données) souhaitées. Doivent être dans un vecteur.
+#/ - qual_vars: Choix des variables qualitatives souhaitées. Doivent être dans un vecteur.
+#/ - labels: Labels de l'ensemble des variables (qualitatives et quantitatives). Doivent être dans un vecteur. Pour qu'ils correspondent, il faut les mettre suivant l'ordre d'apparition des variables dans les vecteurs.
+#/  "quant_vars" et "qual_vars".
+library(dplyr)
+library(flextable)
+library(officer)
+library(tibble)
+
+# ---------------------------
+# table_to_word : génération de tableaux Word avec statistiques
+# ---------------------------
+table_to_word <- function(
+  df,
+  group_var,
+  quant_vars = NULL,
+  qual_vars  = NULL,
+  labels     = NULL,
+  stats_quant = c("median_iqr","min_max","mean_sd","na"),
+  tests_choices = NULL,
+  conditions = NULL,
+  filename    = "Table.docx",
+  font_size   = 8            # taille police du tableau (8 = compact, 9 = normal)
+) {
+  
+  rows <- list()
+  
+  # -----------------------------
+  # Fonction utilitaire : filtrage par variable selon conditions
+  # -----------------------------
+  filter_for_var <- function(df, var, conditions) {
+    if (!is.null(conditions) && var %in% names(conditions)) {
+      df <- df %>% dplyr::filter(eval(conditions[[var]], envir = df))
+    }
+    df
+  }
+  # =============================
+  # Quantitatives
+  # =============================
+  if (!is.null(quant_vars)) {
+    for (v in quant_vars) {
+      
+      df_v <- filter_for_var(df, v, conditions)
+      
+      g_raw <- df_v[[group_var]]
+      g <- droplevels(g_raw)
+      x <- df_v[[v]]
+      
+      group_counts <- table(g)
+      group_names <- names(group_counts)
+      
+      # -----------------------------
+      # Choix du test statistique
+      # -----------------------------
+      test_type <- NULL
+      if (!is.null(tests_choices$quant) && v %in% names(tests_choices$quant)) {
+        test_type <- tolower(tests_choices$quant[[v]])
+      }
+      k <- length(unique(na.omit(g)))
+      if (k == 2) {
+        if (is.null(test_type)) test_type <- "wilcoxon"
+        if (test_type == "wilcoxon") {
+          test <- wilcox.test(x ~ g)
+          test_name <- "Wilcoxon"
+          pval <- test$p.value
+        } else if (test_type == "ttest") {
+          test <- t.test(x ~ g, var.equal = TRUE)
+          test_name <- "t-test"
+          pval <- test$p.value
+        } else if (test_type == "welch") {
+          test <- t.test(x ~ g, var.equal = FALSE)
+          test_name <- "Welch"
+          pval <- test$p.value
+        } else {
+          stop(paste("Test non reconnu pour la variable", v))
+        }
+      } else if (k >= 3) {
+        if (is.null(test_type)) test_type <- "anova"
+        if (test_type == "anova") {
+          test <- aov(x ~ g)
+          pval <- summary(test)[[1]][["Pr(>F)"]][1]
+          test_name <- "ANOVA"
+        } else if (test_type == "kruskal") {
+          test <- kruskal.test(x ~ g)
+          pval <- test$p.value
+          test_name <- "Kruskal"
+        } else {
+          stop(paste("Test non reconnu pour la variable", v))
+        }
+      } else {
+        test_name <- ""
+        pval <- ""
+      }
+      
+      # -----------------------------
+      # Fonction de stats quantitatives
+      # -----------------------------
+      stat_quant_full <- function(x, stats) {
+        res <- list()
+        
+        n_tot <- length(x)
+        n_na  <- sum(is.na(x))
+        
+        if ("na" %in% stats) {
+          if (n_tot > 0) {
+            res[["NA"]] <- paste0(n_na, " (", round(100 * n_na / n_tot, 1), "%)")
+          } else {
+            res[["NA"]] <- "0 (0%)"
+          }
+        }
+        
+        x2 <- x[!is.na(x)]
+        
+        if (length(x2) == 0) {
+          for (s in setdiff(stats, "na")) res[[s]] <- ""
+          return(res)
+        }
+        
+        if ("median_iqr" %in% stats) {
+          q1 <- as.numeric(quantile(x2, 0.25, names = FALSE))
+          q3 <- as.numeric(quantile(x2, 0.75, names = FALSE))
+          res[["Median (IQR)"]] <- sprintf("%.1f (%.1f–%.1f)",
+                                           median(x2),
+                                           q1,
+                                           q3)
+        }
+        
+        if ("min_max" %in% stats) {
+          res[["Min–Max"]] <- sprintf("%.1f–%.1f", min(x2), max(x2))
+        }
+        
+        if ("mean_sd" %in% stats) {
+          if (length(x2) >= 2) {
+            res[["Mean (SD)"]] <- sprintf("%.1f (%.1f)", mean(x2), sd(x2))
+          } else {
+            res[["Mean (SD)"]] <- sprintf("%.1f (NA)", mean(x2))
+          }
+        }
+        
+        return(res)
+      }
+      
+      stats_list <- stat_quant_full(x, stats = stats_quant)
+      
+      # -----------------------------
+      # Ligne parent
+      # -----------------------------
+      parent_line <- tibble::tibble(
+        Variable = if(!is.null(labels)) labels[[v]] else v,
+        Modalité = "",
+        n = as.character(sum(!is.na(x))),
+        Total = "",
+        Test = test_name,
+        `p-value` = ifelse(is.numeric(pval), sprintf("%.3f", pval), "")
+      )
+      
+      for (grp in group_names) parent_line[[grp]] <- ""
+      rows[[length(rows) + 1]] <- parent_line
+      
+      # -----------------------------
+      # Lignes enfants
+      # -----------------------------
+      for (nm in names(stats_list)) {
+        child_line <- tibble::tibble(
+          Variable = "",
+          Modalité = nm,
+          n = "",
+          Total = stats_list[[nm]],
+          Test = "",
+          `p-value` = ""
+        )
+        
+        for (grp in group_names) {
+          idx <- which(g == grp)
+          grp_stats <- stat_quant_full(x[idx], stats = stats_quant)
+          
+          if (nm %in% names(grp_stats)) {
+            child_line[[grp]] <- grp_stats[[nm]]
+          } else {
+            child_line[[grp]] <- "0 (0%)"
+          }
+        }
+        
+        rows[[length(rows) + 1]] <- child_line
+      }
+    }
+  }
+  
+  # =============================
+  # Qualitatives
+  # =============================
+  if (!is.null(qual_vars)) {
+    
+    stat_qual <- function(x) {
+      tab <- table(x, useNA = "no")
+      pct <- round(100 * tab / length(x), 1)
+      out <- paste0(tab, " (", pct, "%)")
+      names(out) <- names(tab)
+      n_na <- sum(is.na(x))
+      if (n_na > 0) {
+        out <- c(out, "NA" = paste0(n_na, " (", round(100 * n_na / length(x), 1), "%)"))
+      }
+      return(out)
+    }
+    
+    choose_independence_test <- function(tbl) {
+      expected <- suppressWarnings(chisq.test(tbl)$expected)
+      prop_ge5 <- mean(expected >= 5)
+      if (prop_ge5 >= 0.8) {
+        test_name <- "Chi²"
+        pval <- chisq.test(tbl, correct = FALSE)$p.value
+      } else {
+        test_name <- "Fisher"
+        pval <- fisher.test(tbl)$p.value
+      }
+      list(test = test_name, p = pval)
+    }
+    
+    for (v in qual_vars) {
+      
+      df_v <- filter_for_var(df, v, conditions)
+      
+      g_raw <- df_v[[group_var]]
+      g <- droplevels(g_raw)
+      x <- df_v[[v]]
+      
+      group_counts <- table(g)
+      group_names <- names(group_counts)
+      
+      tbl <- table(x, g)
+      test_res <- choose_independence_test(tbl)
+      pval_fmt <- sprintf("%.3f", test_res$p)
+      mod_stats <- stat_qual(x)
+      
+      # Ligne parent
+      parent_line <- tibble::tibble(
+        Variable = if(!is.null(labels)) labels[[v]] else v,
+        Modalité = "",
+        n = as.character(sum(!is.na(x))),
+        Total = "",
+        Test = test_res$test,
+        `p-value` = pval_fmt
+      )
+      
+      for (grp in group_names) parent_line[[grp]] <- ""
+      rows[[length(rows) + 1]] <- parent_line
+      
+      # Lignes enfants
+      for (mod in names(mod_stats)) {
+        child_line <- tibble::tibble(
+          Variable = "",
+          Modalité = mod,
+          n = "",
+          Total = mod_stats[[mod]],
+          Test = "",
+          `p-value` = ""
+        )
+        
+        for (grp in group_names) {
+          idx <- which(g == grp)
+          grp_stats <- stat_qual(x[idx])
+          
+          if (mod %in% names(grp_stats)) {
+            child_line[[grp]] <- grp_stats[[mod]]
+          } else {
+            child_line[[grp]] <- "0 (0%)"
+          }
+        }
+        
+        rows[[length(rows) + 1]] <- child_line
+      }
+    }
+  }
+  
+  # =============================
+  # Fusion finale
+  # =============================
+  df_out <- dplyr::bind_rows(rows)
+  
+  g_all <- droplevels(df[[group_var]])
+  group_counts_all <- table(g_all)
+  
+  for (grp in names(group_counts_all)) {
+    colnames(df_out)[colnames(df_out) == grp] <- 
+      paste0(grp, " (N=", group_counts_all[grp], ")")
+  }
+  
+  df_out <- df_out %>%
+    dplyr::select(
+      Variable, Modalité, n, Total,
+      tidyselect::matches("\\(N="),
+      Test, `p-value`
+    )
+
+  # =============================
+  # EXPORT WORD
+  # =============================
+
+  # Indices des lignes parent (Variable non vide = ligne de titre de variable)
+  parent_rows <- which(df_out$Variable != "")
+  # Indices des lignes enfant (Variable vide = statistiques indentées)
+  child_rows  <- which(df_out$Variable == "")
+
+  ft <- flextable(df_out)
+
+  # Gras sur les lignes parent
+  # Taille de police réduite pour tenir sur la page
+  ft <- fontsize(ft, size = font_size, part = "all")
+  ft <- fontsize(ft, size = font_size, part = "header")
+
+  ft <- bold(ft, i = parent_rows, bold = TRUE)
+
+  # Indentation des lignes enfant via padding gauche
+  ft <- padding(ft, i = child_rows, j = "Modalité", padding.left = 20)
+
+  # Fond gris clair sur les lignes parent pour les distinguer
+  ft <- bg(ft, i = parent_rows, bg = "#F2F2F2")
+
+  # p-value en rouge si significative (< 0.05)
+  pval_num <- suppressWarnings(as.numeric(df_out$`p-value`))
+  sig_rows  <- which(!is.na(pval_num) & pval_num < 0.05)
+  if (length(sig_rows) > 0) {
+    ft <- color(ft, i = sig_rows, j = "p-value", color = "#C00000")
+    ft <- bold(ft,  i = sig_rows, j = "p-value", bold = TRUE)
+  }
+
+  # En-tête en gras + fond bleu foncé + texte blanc
+  ft <- bold(ft, part = "header", bold = TRUE)
+  ft <- bg(ft, part = "header", bg = "#1F3864")
+  ft <- color(ft, part = "header", color = "white")
+
+  # Alignement : n et p-value centrés, reste à gauche
+  ft <- align(ft, align = "left",   part = "all")
+  ft <- align(ft, j = c("n", "p-value"), align = "center", part = "all")
+
+  # Bordures propres
+  ft <- border_remove(ft)
+  ft <- hline(ft, part = "header",
+              border = officer::fp_border(color = "white", width = 1))
+  ft <- hline(ft, i = parent_rows,
+              border = officer::fp_border(color = "#BFBFBF", width = 0.5))
+  ft <- hline_bottom(ft, part = "body",
+                     border = officer::fp_border(color = "#1F3864", width = 1.5))
+
+  # Largeur totale contrainte à la page A4 (marges 2.5cm → 16.5cm utilisables)
+  ft <- set_table_properties(ft, layout = "fixed")
+  ft <- width(ft, width = 16.5 / ncol(df_out), unit = "cm")
+
+  doc <- read_docx()
+  doc <- body_add_par(doc, " ", style = "Normal")
+
+  doc <- body_add_flextable(doc, ft)
+
+  print(doc, target = filename)
+  Sys.chmod(filename, mode = "0644")  # lecture/écriture pour l'utilisateur
+
+  return(df_out)
+}
+
+# Commentaires: 
+# Les fonctions (6) à (10) sont surtout utiles pour construire la fonction (11).
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : export_estimates_table
+# ==============================================================
+# Description :
+# Cette fonction crée et exporte un tableau d'estimations statistiques dans un
+# fichier Word (.docx) au format lisible. Elle permet de transformer les
+# estimations (log, exponentielle, etc.), d'ajouter les intervalles de confiance,
+# les p-values/probabilités et les groupes pour organiser le tableau.
+#
+# Arguments :
+# - Variable    : vecteur de noms de variables (obligatoire)
+# - Estimate    : vecteur d'estimations numériques (obligatoire)
+# - CI_Lower    : vecteur des bornes inférieures des intervalles de confiance
+# - CI_Upper    : vecteur des bornes supérieures des intervalles de confiance
+# - p_values    : vecteur de p-values ou probabilités (optionnel)
+# - Group       : vecteur de groupes pour les variables (optionnel)
+# - transform   : fonction appliquée aux estimations et CI (ex: identity, log, exp)
+# - digits      : nombre de chiffres à afficher (par défaut 3)
+# - file_path   : chemin et nom du fichier Word de sortie (par défaut "estimates_table.docx")
+#
+# Étapes principales :
+# 1. Vérifie que tous les vecteurs obligatoires ont la même longueur.
+# 2. Applique la transformation spécifiée aux estimations et aux bornes CI.
+# 3. Formate les intervalles de confiance au format "[lower - upper]".
+# 4. Construit un data.frame avec Variable, Estimate, CI, et éventuellement p_value et Group.
+# 5. Crée un tableau Word avec `flextable` et applique un style box.
+# 6. Exporte le tableau dans un fichier Word via `officer::read_docx` et `body_add_flextable`.
+#
+# Retour :
+# - Le data.frame final avec les estimations transformées, CI, p-values et groupes.
+#
+# Exemple d'utilisation :
+#   df <- export_estimates_table(
+#           Variable = c("age", "sex"),
+#           Estimate = c(1.2, 0.8),
+#           CI_Lower = c(1.0, 0.6),
+#           CI_Upper = c(1.4, 1.0),
+#           p_values = c(0.03, 0.12),
+#           Group = c("Demographics", "Demographics"),
+#           transform = exp,
+#           digits = 2,
+#           file_path = "my_estimates.docx"
+#         )
+# ==============================================================
+export_estimates_table <- function(Variable,        # vecteur de noms de variables
+                                   Estimate,        # vecteur d'estimations
+                                   CI_Lower,        # vecteur bornes inférieures
+                                   CI_Upper,        # vecteur bornes supérieures
+                                   p_values = NULL, # vecteur de p-values ou probabilités (optionnel)
+                                   Group = NULL,    # vecteur des groupes des variables (optionnel)
+                                   transform = identity, # fonction: identity, log, exp, etc.
+                                   digits = 3,      # nombre de chiffres après la virgule
+                                   file_path = "estimates_table.docx") {
+  
+  if (length(Variable) != length(Estimate) || 
+      length(Estimate) != length(CI_Lower) ||
+      length(CI_Lower) != length(CI_Upper)) {
+    stop("Tous les vecteurs Variable, Estimate, CI_Lower et CI_Upper doivent avoir la même longueur")
+  }
+  
+  # Appliquer transformation
+  est_trans <- transform(Estimate)
+  ci_lower_trans <- transform(CI_Lower)
+  ci_upper_trans <- transform(CI_Upper)
+  
+  # Construire colonne CI au format [lower - upper]
+  ci_str <- paste0("[", round(ci_lower_trans, digits), " - ", round(ci_upper_trans, digits), "]")
+  
+  # Créer dataframe
+  df <- data.frame(
+    Variable = Variable,
+    Estimate = round(est_trans, digits),
+    CI = ci_str,
+    stringsAsFactors = FALSE
+  )
+  
+  # Ajouter p-values ou probabilités si fournies
+  if (!is.null(p_values)) {
+    if (length(p_values) != length(Estimate)) stop("La longueur de p_values doit correspondre au nombre de variables")
+    df$p_value <- round(p_values, digits)
+  }
+  
+  # Ajouter groupes si fournis
+  if (!is.null(Group)) {
+    if (length(Group) != length(Estimate)) stop("La longueur de Group doit correspondre au nombre de variables")
+    df$Group <- Group
+  }
+  
+  # Créer le tableau Word
+  ft <- flextable(df) %>%
+    autofit() %>%
+    theme_box() %>%
+    set_header_labels(
+      Variable = "Variable",
+      Estimate = "Estimate",
+      CI = "95% CI",
+      p_value = if(!is.null(p_values)) "p-value / Prob." else NULL,
+      Group = if(!is.null(Group)) "Group" else NULL
+    )
+  
+  # Exporter en Word
+  doc <- read_docx() %>%
+    body_add_par("Tableau des estimations", style = "heading 2") %>%
+    body_add_flextable(ft) %>%
+    body_add_par("", style = "Normal")
+  
+  print(doc, target = file_path)
+  
+  return(df)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : export_decisionnel_logistique
+# ==============================================================
+# Description :
+# Cette fonction prend un modèle logistique (`glm` binomial) et crée un
+# tableau décisionnel exportable dans un fichier Word (.docx) ou
+# affichable via `gt`. Elle calcule les Odds Ratios (OR), les intervalles
+# de confiance à 95%, et fournit une interprétation simple pour la lecture
+# décisionnelle.
+#
+# Arguments :
+# - model            : objet glm de type binomial (obligatoire)
+# - file_name        : nom du fichier Word de sortie (défaut "rapport_decisionnel.docx")
+# - alpha            : niveau de confiance pour IC (défaut 0.05)
+# - digits_or        : nombre de chiffres après la virgule pour OR et IC (défaut 2)
+# - digits_p         : nombre de chiffres pour la p-value (défaut 2)
+# - remove_intercept : booléen, si TRUE l'intercept est retiré du tableau (défaut TRUE)
+# - title            : titre du tableau GT
+# - subtitle         : sous-titre du tableau GT
+#
+# Étapes principales :
+# 1. Vérifie que le modèle fourni est bien un `glm` binomial.
+# 2. Extrait les coefficients, calcul OR et IC 95 % via la formule exponentielle.
+# 3. Crée un tableau data.frame avec :
+#       - Variable
+#       - OR
+#       - IC_95
+#       - p-value
+#       - Interprétation ("Facteur de risque potentiel", "Facteur protecteur potentiel", "Association incertaine")
+# 4. Supprime l’intercept si demandé.
+# 5. Formate le tableau avec `gt` : titres, labels, style en gras pour interprétation significative.
+# 6. Ajoute une note de source précisant que les résultats sont issus d’un modèle ajusté.
+# 7. Exporte le tableau Word via `gtsave`.
+#
+# Retour :
+# - Un objet `gt` représentant le tableau décisionnel.
+#
+# Exemple d'utilisation :
+#   gt_tbl <- export_decisionnel_logistique(
+#               model = mon_modele_glm,
+#               file_name = "rapport.docx",
+#               alpha = 0.05,
+#               digits_or = 2,
+#               digits_p = 3,
+#               remove_intercept = TRUE,
+#               title = "Facteurs associés à l’événement",
+#               subtitle = "Analyse logistique multivariée"
+#             )
+# ==============================================================
+export_decisionnel_logistique <- function(
+  model,
+  file_name = "rapport_decisionnel.docx",
+  alpha = 0.05,
+  digits_or = 2,
+  digits_p = 2,
+  remove_intercept = TRUE,
+  title = "Facteurs associés à l’événement étudié",
+  subtitle = "Modèle logistique multivarié – Analyse décisionnelle"
+) {
+  
+  # ===============================
+  # Vérifications
+  # ===============================
+  if (!inherits(model, "glm")) {
+    stop("Le modèle fourni doit être un objet glm (logistique).")
+  }
+  
+  if (family(model)$family != "binomial") {
+    stop("Le modèle doit être de type binomial (logistique).")
+  }
+  
+  # ===============================
+  # Extraction des coefficients
+  # ===============================
+  coefs <- summary(model)$coefficients
+  
+  # ===============================
+  # Calcul OR et IC
+  # ===============================
+  OR <- exp(coefs[, "Estimate"])
+  CI_lower <- exp(coefs[, "Estimate"] - qnorm(1 - alpha / 2) * coefs[, "Std. Error"])
+  CI_upper <- exp(coefs[, "Estimate"] + qnorm(1 - alpha / 2) * coefs[, "Std. Error"])
+  pval <- coefs[, "Pr(>|z|)"]
+  
+  # ===============================
+  # Tableau décisionnel
+  # ===============================
+  result_table <- data.frame(
+    Variable = rownames(coefs),
+    OR = round(OR, digits_or),
+    IC_95 = paste0(
+      "[",
+      round(CI_lower, digits_or),
+      " ; ",
+      round(CI_upper, digits_or),
+      "]"
+    ),
+    P_value = signif(pval, digits_p),
+    Interpretation = ifelse(
+      CI_lower > 1, "Facteur de risque potentiel",
+      ifelse(CI_upper < 1, "Facteur protecteur potentiel", "Association incertaine")
+    )
+  )
+  
+  # Suppression de l'intercept si demandé
+  if (remove_intercept) {
+    result_table <- result_table[result_table$Variable != "(Intercept)", ]
+  }
+  
+  # ===============================
+  # Mise en forme gt
+  # ===============================
+  gt_table <- gt(result_table) %>%
+    tab_header(
+      title = title,
+      subtitle = subtitle
+    ) %>%
+    cols_label(
+      Variable = "Variable analysée",
+      OR = "Odds Ratio",
+      IC_95 = "IC 95 %",
+      P_value = "p-value",
+      Interpretation = "Lecture décisionnelle"
+    ) %>%
+    tab_style(
+      style = cell_text(weight = "bold"),
+      locations = cells_body(
+        columns = Interpretation,
+        rows = Interpretation != "Association incertaine"
+      )
+    ) %>%
+    tab_source_note(
+      source_note = paste0(
+        "Résultats issus d’un modèle logistique ajusté. ",
+        "Les associations observées ne constituent pas une preuve causale. ",
+        "Niveau de confiance : ", round((1 - alpha) * 100), "%."
+      )
+    )
+  
+  # ===============================
+  # Export Word
+  # ===============================
+  gtsave(gt_table, file_name)
+  
+  return(gt_table)
+}
+
+```
+
+
+```{r}
+###############################################################################
+# Fonction : export_bootstrap_logistic
+###############################################################################
+#
+# Description :
+# Cette fonction permet d’exporter dans un document Word les résultats d’un
+# modèle de régression logistique analysé par bootstrap.
+#
+# À partir des coefficients bootstrapés d’un modèle logistique, la fonction :
+#   - calcule les Odds Ratios (OR),
+#   - estime les intervalles de confiance bootstrap à 95%,
+#   - produit une interprétation décisionnelle automatique,
+#   - génère un tableau formaté,
+#   - exporte automatiquement le résultat dans un fichier Word (.docx).
+#
+# ---------------------------------------------------------------------------
+# Méthodologie statistique :
+# ---------------------------------------------------------------------------
+#
+# Les Odds Ratios sont obtenus par exponentiation de la moyenne des coefficients
+# bootstrap :
+#
+#   OR = exp(moyenne(beta_bootstrap))
+#
+# Les intervalles de confiance à 95% sont calculés selon l’approche percentile :
+#
+#   IC95% = [2.5% ; 97.5%]
+#
+# Cette approche permet d’obtenir des estimations robustes même lorsque :
+#   - l’échantillon est de taille modérée,
+#   - les hypothèses asymptotiques sont fragiles,
+#   - la stabilité des coefficients doit être évaluée empiriquement.
+#
+# ---------------------------------------------------------------------------
+# Arguments :
+# ---------------------------------------------------------------------------
+#
+# boot_coef :
+#   Matrice ou data.frame contenant les coefficients bootstrap.
+#   Chaque ligne correspond à une itération bootstrap.
+#   Chaque colonne correspond à un coefficient du modèle.
+#
+#   IMPORTANT :
+#   Les noms des colonnes doivent être identiques aux noms des coefficients
+#   du modèle original.
+#
+#
+# original_model :
+#   Objet glm() correspondant au modèle logistique initial.
+#   Sert à récupérer automatiquement les noms des variables.
+#
+#
+# file_name :
+#   Nom du fichier Word exporté.
+#
+#   Exemple :
+#   "rapport_bootstrap.docx"
+#
+#
+# title :
+#   Titre affiché dans le document Word.
+#
+#
+# ---------------------------------------------------------------------------
+# Structure du tableau généré :
+# ---------------------------------------------------------------------------
+#
+# Le tableau exporté contient :
+#
+#   - Variable analysée
+#   - Odds Ratio
+#   - Intervalle de confiance à 95%
+#   - Lecture décisionnelle
+#
+#
+# ---------------------------------------------------------------------------
+# Interprétation automatique :
+# ---------------------------------------------------------------------------
+#
+# La colonne "Lecture décisionnelle" est construite automatiquement :
+#
+#   - IC95% entièrement > 1 :
+#         "Facteur de risque potentiel"
+#
+#   - IC95% entièrement < 1 :
+#         "Facteur protecteur potentiel"
+#
+#   - IC95% contenant 1 :
+#         "Association incertaine"
+#
+#
+# ---------------------------------------------------------------------------
+# Packages nécessaires :
+# ---------------------------------------------------------------------------
+#
+#   - dplyr
+#   - flextable
+#   - officer
+#
+#
+# ---------------------------------------------------------------------------
+# Exemple d’utilisation :
+# ---------------------------------------------------------------------------
+#
+# export_bootstrap_logistic(
+#   boot_coef = boot_coef,
+#   original_model = model_global,
+#   file_name = "rapport_bootstrap_model.docx",
+#   title = "Analyse bootstrap du modèle logistique"
+# )
+#
+#
+# ---------------------------------------------------------------------------
+# Valeur retournée :
+# ---------------------------------------------------------------------------
+#
+# La fonction n’affiche pas de valeur particulière dans la console.
+# Elle génère directement un document Word dans le répertoire de travail.
+#
+###############################################################################
+
+export_bootstrap_logistic <- function(
+    boot_coef,
+    original_model,
+    file_name = "rapport_bootstrap.docx",
+    title = "Résultats bootstrap du modèle logistique"
+){
+
+  # Variables
+  vars <- names(coef(original_model))
+
+  # Suppression intercept
+  vars <- vars[vars != "(Intercept)"]
+
+  # OR bootstrap
+  or_boot <- apply(
+    boot_coef[, vars, drop = FALSE],
+    2,
+    function(x) exp(mean(x, na.rm = TRUE))
+  )
+
+  # IC95%
+  ic_low <- apply(
+    boot_coef[, vars, drop = FALSE],
+    2,
+    function(x) exp(quantile(x, 0.025, na.rm = TRUE))
+  )
+
+  ic_high <- apply(
+    boot_coef[, vars, drop = FALSE],
+    2,
+    function(x) exp(quantile(x, 0.975, na.rm = TRUE))
+  )
+
+  # Tableau
+  tab <- data.frame(
+    "Variable analysée" = vars,
+    "Odds Ratio" = round(or_boot, 2),
+    "IC 95 %" = paste0(
+      "[",
+      round(ic_low, 2),
+      " ; ",
+      round(ic_high, 2),
+      "]"
+    ),
+    check.names = FALSE
+  )
+
+  # Lecture décisionnelle
+  tab$`Lecture décisionnelle` <- ifelse(
+    ic_low > 1,
+    "Facteur de risque potentiel",
+    ifelse(
+      ic_high < 1,
+      "Facteur protecteur potentiel",
+      "Association incertaine"
+    )
+  )
+
+  # Flextable
+  ft <- flextable(tab)
+
+  ft <- autofit(ft)
+
+  # Document Word
+  doc <- read_docx()
+
+  doc <- body_add_par(
+    doc,
+    title,
+    style = "heading 1"
+  )
+
+  doc <- body_add_flextable(doc, ft)
+
+  doc <- body_add_par(
+    doc,
+    "Résultats issus d’un modèle logistique avec estimation bootstrap des intervalles de confiance à 95%.",
+    style = "Normal"
+  )
+
+  # Export
+  print(doc, target = file_name)
+
+}
+```
+
+

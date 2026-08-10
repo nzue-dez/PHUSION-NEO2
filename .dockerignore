@@ -1,0 +1,7 @@
+.git
+.Rhistory
+.Rprofile
+renv/library
+figures/
+results/
+*.Rproj

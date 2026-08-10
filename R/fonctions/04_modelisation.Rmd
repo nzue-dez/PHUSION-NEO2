@@ -1,0 +1,827 @@
+---
+title: "Modélisation & Machine Learning"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX — 04_modelisation.Rmd
+# =============================================================================
+#
+# MÉTRIQUES & VALIDATION
+#   compute_metrics            — Métriques de classification binaire (accuracy, F1…)
+#   create_folds_stratified    — K-folds stratifiés pour validation croisée
+#   split_train_test_stratified— Split train/test stratifié
+#   split_train_val_test       — Split train/validation/test stratifié
+#
+# ENTRAÎNEMENT & PRÉDICTION
+#   predict_model              — Entraînement + prédiction (lm/glm)
+#   run_cross_validation       — Validation croisée stratifiée avec tableau GT
+#
+# ÉVALUATION & SÉLECTION
+#   plot_roc_val_test          — Courbes ROC validation + test + indice Youden
+#   stability_selection        — Sélection variables par bootstrap + Elastic Net/LASSO
+# =============================================================================
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (18)
+# ------------------------------------------------------------------
+# Fonction : compute_metrics
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction calcule les métriques de performance pour un modèle
+# de classification binaire à partir des vecteurs de valeurs réelles
+# et prédites. Elle fournit la matrice de confusion et les mesures
+# classiques d’évaluation.
+#
+# Arguments :
+# - true : vecteur des valeurs réelles (0/1)
+# - predicted : vecteur des valeurs prédites (0/1)
+#
+# Fonctionnement :
+# - Construit la matrice de confusion (Predicted vs Actual)
+# - Calcule :
+#     → True Positives (TP), True Negatives (TN)
+#     → False Positives (FP), False Negatives (FN)
+# - Calcule les métriques :
+#     → accuracy    : proportion de prédictions correctes
+#     → sensitivity : rappel / taux de vrais positifs (TP / (TP + FN))
+#     → specificity : taux de vrais négatifs (TN / (TN + FP))
+#     → precision   : exactitude des positifs (TP / (TP + FP))
+#     → f1_score    : moyenne harmonique de precision et sensitivity
+#
+# Sortie :
+# - Liste contenant :
+#     * confusion_matrix : matrice de confusion
+#     * accuracy         : précision globale
+#     * sensitivity      : rappel
+#     * specificity      : spécificité
+#     * precision        : précision
+#     * f1_score         : score F1
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Les vecteurs true et predicted doivent être codés en 0 et 1
+# - Utile pour évaluer la performance de modèles de classification
+#   binaire
+# ------------------------------------------------------------------
+compute_metrics <- function(true, predicted) {
+  # Forcer les deux niveaux "0"/"1" pour que la matrice soit toujours 2×2,
+  # même si toutes les prédictions ou valeurs réelles sont d'une seule classe.
+  lvls <- c("0", "1")
+  cm <- table(
+    Predicted = factor(as.character(predicted), levels = lvls),
+    Actual    = factor(as.character(true),      levels = lvls)
+  )
+
+  TN <- cm["0", "0"]
+  TP <- cm["1", "1"]
+  FN <- cm["0", "1"]
+  FP <- cm["1", "0"]
+  
+  accuracy <- (TP + TN) / sum(cm)
+  sensitivity <- TP / (TP + FN) 
+  specificity <- TN / (TN + FP)
+  precision <- TP / (TP + FP)
+  f1 <- 2 * ((precision * sensitivity) / (precision + sensitivity))
+  
+  list(
+    confusion_matrix = cm,
+    accuracy = accuracy,
+    sensitivity = sensitivity,
+    specificity = specificity,
+    precision = precision,
+    f1_score = f1
+  )
+}
+
+```
+
+
+```{r}
+#########################################################################################################################
+# Fonction (24)
+# ------------------------------------------------------------------
+# Fonction : create_folds_stratified
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction crée des k folds pour une validation croisée
+# stratifiée selon la variable cible, afin de conserver la proportion
+# des classes dans chaque fold.
+#
+# Arguments :
+# - data : data.frame contenant les données
+# - target : nom de la variable cible (factor ou discrete) pour la stratification
+# - k : nombre de folds à créer (par défaut 5)
+# - seed : graine pour le tirage aléatoire (par défaut 123) afin de garantir la reproductibilité
+#
+# Fonctionnement :
+# - Identifie toutes les classes présentes dans la variable cible
+# - Pour chaque classe :
+#     → récupère les indices des observations
+#     → mélange aléatoirement ces indices
+#     → répartit les indices dans les folds de manière round-robin
+#       pour garantir une proportion équilibrée
+# - Chaque fold est ensuite mélangé individuellement pour plus de randomisation
+#
+# Sortie :
+# - Liste de longueur k, chaque élément contenant les indices des observations
+#   assignées à ce fold
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Permet d’effectuer une validation croisée stratifiée sur des données
+#   déséquilibrées
+# - Garantit que chaque fold contient approximativement la même proportion
+#   de classes que l’ensemble original
+# ------------------------------------------------------------------
+create_folds_stratified <- function(data, target, k = 5, seed = 123) {
+  set.seed(seed)
+  
+  classes <- unique(data[[target]])
+  # vector("list", k) initialise chaque élément à NULL.
+  # Note : ne pas faire folds[[i]] <- c() dans une boucle d'init —
+  # assigner NULL à un élément de liste le supprime au lieu de l'initialiser,
+  # ce qui viderait la liste. c(NULL, index) fonctionne naturellement.
+  folds <- vector("list", k)
+
+  # Répartition classe par classe
+  for (cl in classes) {
+    indices_cl <- which(data[[target]] == cl)
+    indices_cl <- sample(indices_cl)  # mélange interne à la classe
+    
+    # Distribution round-robin : 1 -> fold1, 2 -> fold2, ..., k -> foldk, puis recommencer
+    for (i in seq_along(indices_cl)) {
+      fold_number <- ((i - 1) %% k) + 1
+      folds[[fold_number]] <- c(folds[[fold_number]], indices_cl[i])
+    }
+  }
+  
+  # Mélange final dans chaque fold (optionnel mais propre)
+  folds <- lapply(folds, sample)
+  
+  return(folds)
+}
+
+```
+
+
+```{r}
+#########################################################################################################################
+# Fonction (25)
+# ------------------------------------------------------------------
+# Fonction : predict_model
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction entraîne un modèle linéaire (lm) ou logistique (glm)
+# sur un jeu de données d'entraînement, puis génère des prédictions
+# sur un jeu de test. Pour les modèles logistiques, elle permet de
+# convertir les probabilités en classes binaires selon un seuil.
+#
+# Arguments :
+# - model_type : type de modèle à entraîner ("glm" pour logistique, "lm" pour linéaire)
+# - formula : formule R décrivant la relation cible ~ prédicteurs
+# - train_data : data.frame pour l'entraînement
+# - test_data : data.frame pour générer les prédictions
+# - threshold : seuil de classification pour transformer les probabilités en classes (par défaut 0.5)
+#
+# Fonctionnement :
+# - Entraîne le modèle choisi sur train_data
+# - Pour un glm binomial :
+#     → prédit les probabilités sur test_data
+#     → applique le seuil pour générer les prédictions 0/1
+# - Pour un lm :
+#     → prédit directement les valeurs numériques
+# - Retourne le modèle entraîné, les prédictions et les probabilités si applicable
+#
+# Sortie :
+# - Liste contenant :
+#     * model : objet modèle entraîné (lm ou glm)
+#     * preds : vecteur de prédictions (classes ou valeurs numériques)
+#     * probs : probabilités pour un glm binomial, NULL pour lm
+#
+# Dépendances :
+# - stats (glm, lm, predict)
+#
+# Remarques :
+# - Utile pour tester rapidement différents modèles sur des données
+#   d’entraînement et générer des prédictions sur un jeu de test
+# - Pour glm binomial, les prédictions sont des caractères "0"/"1"
+# ------------------------------------------------------------------
+predict_model <- function(model_type, formula, train_data, test_data, threshold = 0.5) {
+  # Entraînement
+  if (model_type == "glm") {
+    model <- glm(formula, data = train_data, family = binomial)
+  } else if (model_type == "lm") {
+    model <- lm(formula, data = train_data)
+  } else {
+    stop(paste("Modèle non supporté:", model_type))
+  }
+  
+  # Prédiction
+  if (inherits(model, "glm") && model$family$family == "binomial") {
+    probs <- predict(model, newdata = test_data, type = "response")
+    preds <- ifelse(probs > threshold, "1", "0")
+  } else if (inherits(model, "lm")) {
+    preds <- predict(model, newdata = test_data)
+    probs <- NULL
+  }
+  
+  list(
+    model = model,
+    preds = preds,
+    probs = probs
+  )
+}
+
+```
+
+
+```{r}
+#########################################################################################################################
+# Fonction (27)
+# ------------------------------------------------------------------
+# Fonction : split_train_test_stratified
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction divise un data.frame en ensembles d'entraînement et
+# de test tout en conservant la proportion des classes de la variable
+# cible (stratification). Utile pour les problèmes de classification
+# avec classes déséquilibrées.
+#
+# Arguments :
+# - data : data.frame contenant les données
+# - target : nom de la variable cible pour la stratification
+# - test_size : proportion des données à inclure dans le jeu de test (par défaut 0.2)
+# - seed : graine pour le tirage aléatoire afin de garantir la reproductibilité (par défaut 123)
+#
+# Fonctionnement :
+# - Identifie toutes les classes présentes dans la variable cible
+# - Pour chaque classe :
+#     → mélange aléatoirement les indices des observations
+#     → sélectionne test_size proportion d’observations pour le test
+#     → le reste est affecté à l’entraînement
+# - Combine tous les indices des classes pour former les jeux train et test
+# - Mélange les indices finaux pour plus de randomisation
+#
+# Sortie :
+# - Liste contenant :
+#     * train : data.frame du jeu d'entraînement
+#     * test : data.frame du jeu de test
+#     * train_indices : indices des observations dans train
+#     * test_indices : indices des observations dans test
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Assure que chaque fold contient approximativement la même proportion
+#   de classes que le jeu de données original
+# - Utile pour préparer les données avant entraînement de modèles
+#   de classification
+# ------------------------------------------------------------------
+split_train_test_stratified <- function(data, target, test_size = 0.2, seed = 123) {
+  set.seed(seed)
+  
+  # Valeurs uniques de la classe
+  classes <- unique(data[[target]])
+  
+  train_indices <- c()
+  test_indices <- c()
+  
+  # Pour chaque classe, on échantillonne proportionnellement
+  for (cl in classes) {
+    idx <- which(data[[target]] == cl)
+    idx <- sample(idx)  # mélange interne à la classe
+    
+    test_n <- floor(length(idx) * test_size)
+    
+    test_indices_cl <- idx[1:test_n]
+    train_indices_cl <- idx[(test_n + 1):length(idx)]
+    
+    test_indices <- c(test_indices, test_indices_cl)
+    train_indices <- c(train_indices, train_indices_cl)
+  }
+  
+  # Mélanger les indices finaux (pas obligatoire)
+  train_indices <- sample(train_indices)
+  test_indices  <- sample(test_indices)
+  
+  train_data <- data[train_indices, ]
+  test_data  <- data[test_indices, ]
+  
+  list(
+    train = train_data,
+    test = test_data,
+    train_indices = train_indices,
+    test_indices = test_indices
+  )
+}
+
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : split_train_val_test
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction divise un data.frame en trois ensembles : entraînement,
+# validation et test, tout en conservant la proportion des classes de la
+# variable cible (stratification). Utile pour les modèles de classification
+# avec réglage des hyperparamètres et évaluation finale.
+#
+# Arguments :
+# - data : data.frame contenant les données
+# - target : nom de la variable cible pour la stratification
+# - test_size : proportion des données à inclure dans le jeu de test (par défaut 0.2)
+# - val_size : proportion des données restantes à inclure dans le jeu de validation (par défaut 0.2)
+# - seed : graine pour le tirage aléatoire afin de garantir la reproductibilité (par défaut 123)
+#
+# Fonctionnement :
+# 1. Split stratifié train+validation / test :
+#     - Pour chaque classe, sélectionne test_size proportion pour le test
+#     - Le reste constitue train+validation
+# 2. Split stratifié train / validation à partir du train+validation :
+#     - Pour chaque classe, sélectionne val_size proportion pour la validation
+#     - Le reste constitue l’entraînement
+# 3. Les indices finaux sont retournés pour chaque sous-jeu
+#
+# Sortie :
+# - Liste contenant :
+#     * train : data.frame du jeu d'entraînement
+#     * validation : data.frame du jeu de validation
+#     * test : data.frame du jeu de test
+#     * indices : liste des indices pour chaque sous-jeu (train, validation, test)
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Garantit que chaque sous-jeu conserve la proportion originale des classes
+# - Utile pour l’entraînement, le tuning (validation) et l’évaluation finale
+# ------------------------------------------------------------------
+split_train_val_test <- function(data, target, test_size = 0.2, val_size = 0.2, seed = 123) {
+  set.seed(seed)
+  
+  classes <- unique(data[[target]])
+  train_val_indices <- c()
+  test_indices <- c()
+  
+  # Split train_val / test stratifié
+  for (cl in classes) {
+    idx <- which(data[[target]] == cl)
+    idx <- sample(idx)
+    n_test <- floor(length(idx) * test_size)
+    test_indices <- c(test_indices, idx[1:n_test])
+    train_val_indices <- c(train_val_indices, idx[(n_test+1):length(idx)])
+  }
+  
+  train_val_data <- data[train_val_indices, ]
+  test_data <- data[test_indices, ]
+  
+  # Split train / validation stratifié
+  train_indices <- c()
+  val_indices <- c()
+  
+  for (cl in classes) {
+    idx <- which(train_val_data[[target]] == cl)
+    idx <- sample(idx)
+    n_val <- floor(length(idx) * val_size)
+    val_indices <- c(val_indices, idx[1:n_val])
+    train_indices <- c(train_indices, idx[(n_val+1):length(idx)])
+  }
+  
+  train_data <- train_val_data[train_indices, ]
+  val_data <- train_val_data[val_indices, ]
+  
+  list(
+    train = train_data,
+    validation = val_data,
+    test = test_data,
+    indices = list(train=train_indices, validation=val_indices, test=test_indices)
+  )
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : run_cross_validation
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction effectue une validation croisée stratifiée pour un modèle
+# de classification (par défaut glm avec famille binomial) et calcule
+# les métriques de performance pour chaque fold.
+# Elle génère également un tableau GT esthétique et l'exporte au format Word.
+#
+# Arguments :
+# - data : data.frame contenant les données
+# - formula : formule R (ex : target ~ var1 + var2)
+# - family : famille de modèle (par défaut binomial pour classification binaire)
+# - k : nombre de folds pour la validation croisée (par défaut 5)
+# - threshold : seuil de classification pour transformer probabilités en classes (par défaut 0.5)
+# - title : titre du tableau GT (par défaut "Performance du modèle par Fold")
+# - output_file : chemin de sauvegarde du tableau Word (par défaut "resultats_cv.docx")
+#
+# Fonctionnement :
+# 1. Crée k folds stratifiés selon la variable cible pour conserver la proportion des classes
+# 2. Pour chaque fold :
+#     - Sépare train et test
+#     - Entraîne le modèle (glm) sur les données d'entraînement
+#     - Prédit les classes sur le jeu de test
+#     - Calcule les métriques : accuracy, sensitivity, specificity, precision, F1-score
+#     - Stocke également la matrice de confusion pour le fold
+# 3. Combine les résultats de tous les folds en un seul tableau
+# 4. Crée un tableau GT esthétique et l'exporte en Word
+#
+# Sortie :
+# - Liste contenant :
+#     * table : objet GT du tableau de performance
+#     * results : data.frame des métriques par fold
+#     * confusion_matrices : liste des matrices de confusion par fold
+#
+# Dépendances :
+# - packages : gt, dplyr
+# - fonctions internes : create_folds_stratified, train_predict, compute_metrics
+#
+# Remarques :
+# - Stratification utile pour les classes déséquilibrées
+# - Permet d’évaluer la performance modèle avec un tableau synthétique et exportable
+# ------------------------------------------------------------------
+run_cross_validation <- function(data, formula, family = binomial,
+                                 k = 5, threshold = 0.5,
+                                 title = "Performance du modèle par Fold",
+                                 output_file = "resultats_cv.docx") {
+  
+  # Créer les folds stratifiés
+  target <- as.character(formula[[2]])
+  folds <- create_folds_stratified(data, target, k)
+  
+  all_results <- list()
+  all_confusions <- list()
+  
+  # Boucle sur les folds
+  for (i in seq_along(folds)) {
+    test_indices <- folds[[i]]
+    test_data <- data[test_indices, ]
+    train_data <- data[-test_indices, ]
+    
+    # Entraîner et prédire
+    pred_out <- predict_model("glm", formula, train_data, test_data, threshold)
+    
+    # Métriques
+    metrics <- compute_metrics(
+      true = as.character(test_data[[target]]),
+      predicted = pred_out$preds
+    )
+    
+    # Stockage des résultats
+    all_results[[i]] <- data.frame(
+      Fold = paste0("Fold ", i),
+      Accuracy = round(metrics$accuracy, 3),
+      Sensitivity = round(metrics$sensitivity, 3),
+      Specificity = round(metrics$specificity, 3),
+      Precision = round(metrics$precision, 3),
+      F1_score = round(metrics$f1_score, 3)
+    )
+    
+    all_confusions[[i]] <- metrics$confusion_matrix
+  }
+  
+  # Combiner les résultats
+  results_df <- dplyr::bind_rows(all_results)
+  
+  # Tableau GT
+  gt_table <- results_df %>%
+    mutate(across(-Fold, ~ round(.x, 3))) %>%
+    gt::gt() %>%
+    gt::tab_header(title = title) %>%
+    gt::tab_style(
+      style = gt::cell_text(weight = "bold"),
+      locations = gt::cells_column_labels()
+    ) %>%
+    gt::opt_row_striping() %>%
+    gt::fmt_number(
+      columns = c(Accuracy, Sensitivity, Specificity, Precision, F1_score),
+      decimals = 3
+    )
+  
+  gt::gtsave(gt_table, output_file)
+  
+  return(list(
+    table = gt_table,
+    results = results_df,
+    confusion_matrices = all_confusions
+  ))
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_roc_val_test
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction trace les courbes ROC pour les jeux de données de validation
+# et de test dans le cas d'une variable cible binaire. Elle calcule l'AUC,
+# l'intervalle de confiance de l'AUC et l'indice de Youden pour chaque dataset.
+# Le graphique inclut les courbes ROC, les zones sous la courbe (fill),
+# les points correspondant à l'indice de Youden et une annotation des métriques.
+#
+# Arguments :
+# - pred_val_out : liste issue de predict_model pour le dataset de validation
+# - pred_test_out : liste issue de predict_model pour le dataset de test
+# - val_true : vecteur des classes réelles pour le dataset de validation
+# - test_true : vecteur des classes réelles pour le dataset de test
+# - val_color : couleur de remplissage sous la courbe ROC de validation
+# - test_color : couleur de remplissage sous la courbe ROC de test
+# - file_path : chemin pour sauvegarder le graphique (optionnel)
+#
+# Fonctionnement :
+# 1. Récupère les probabilités prédites pour validation et test
+# 2. Crée les objets ROC et calcule AUC + intervalle de confiance
+# 3. Calcule l’indice de Youden pour chaque dataset
+# 4. Prépare un dataframe pour ggplot avec TPR et FPR
+# 5. Trace les courbes ROC, les zones sous les courbes et les points de Youden
+# 6. Ajoute annotations avec AUC et coordonnées Youden
+# 7. Sauvegarde le graphique si file_path est fourni
+#
+# Sortie :
+# - Liste contenant :
+#     * plot : objet ggplot du ROC
+#     * youden : liste des coordonnées FPR/TPR de Youden pour val et test
+#     * auc : liste avec AUC, CI pour val et test
+#
+# Dépendances :
+# - packages : pROC, ggplot2
+#
+# Remarques :
+# - Adapté aux modèles de classification binaire
+# - Permet une visualisation simultanée des performances sur validation et test
+# ------------------------------------------------------------------
+# Dépendances : pROC, ggplot2
+plot_roc_val_test <- function(pred_val_out, pred_test_out,
+                                           val_true, test_true,
+                                           val_color = "skyblue",
+                                           test_color = "pink",
+                                           file_path = NULL) {
+  
+  # --- Récupérer les probabilités ---
+  val_probs <- pred_val_out$probs
+  test_probs <- pred_test_out$probs
+  
+  # --- ROC et AUC avec intervalle de confiance ---
+  roc_val <- roc(val_true, val_probs)
+  roc_test <- roc(test_true, test_probs)
+  
+  auc_val <- auc(roc_val)
+  auc_test <- auc(roc_test)
+  
+  ci_val <- ci.auc(roc_val)
+  ci_test <- ci.auc(roc_test)
+  # --- Indice de Youden ---
+  youden_val <- coords(roc_val, "best", best.method="youden",
+                       ret=c("threshold","specificity","sensitivity"))
+  youden_test <- coords(roc_test, "best", best.method="youden",
+                        ret=c("threshold","specificity","sensitivity"))
+  
+  fpr_val <- 1 - youden_val["specificity"] # taux de faux positif de l'indice de Youden (dataset validation)
+  tpr_val <- youden_val["sensitivity"] # # taux de vrai positif de l'indice de Youden (dataset validation)
+  
+  fpr_test <- 1 - youden_test["specificity"] # taux de faux positif de l'indice de Youden (dataset test)
+  tpr_test <- youden_test["sensitivity"] # taux de vrai positif de l'indice de Youden (dataset test)
+  
+  # --- Data frame ROC pour ggplot ---
+  df_val <- data.frame(
+    TPR = rev(roc_val$sensitivities),
+    FPR = rev(1 - roc_val$specificities),
+    Set = "Validation"
+  )
+  df_test <- data.frame(
+    TPR = rev(roc_test$sensitivities),
+    FPR = rev(1 - roc_test$specificities),
+    Set = "Test"
+  )
+  df_roc <- rbind(df_val, df_test)
+  
+  # --- Graphique ROC avec point de Youden ---
+  roc_plot <- ggplot(df_roc, aes(x = FPR, y = TPR, color = Set, fill = Set)) +
+    geom_line(size = 1.2) +
+    geom_ribbon(data = df_val, aes(ymin = 0, ymax = TPR),
+                fill = val_color, alpha = 0.3, inherit.aes = FALSE) +
+    geom_ribbon(data = df_test, aes(ymin = 0, ymax = TPR),
+                fill = test_color, alpha = 0.3, inherit.aes = FALSE) +
+    geom_point(aes(x = fpr_val, y = tpr_val), color = "blue", size = 3, shape = 16) +
+    geom_point(aes(x = fpr_test, y = tpr_test), color = "red", size = 3, shape = 16) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+    theme_minimal() +
+    labs(
+      title = "ROC Curve with Youden Index",
+      x = "False Positive Rate",
+      y = "True Positive Rate",
+      color = "Dataset",
+      fill = "AUC"
+    ) +
+    annotate(
+      "text", x = 0.6, y = 0.2,
+      label = paste0(
+        "Val: AUC = ", round(auc_val, 3), " (", round(ci_val[1],3), ", ", round(ci_val[3],3), ")\n",
+        "Test: AUC = ", round(auc_test,3), " (", round(ci_test[1],3), ", ", round(ci_test[3],3), ")\n",
+        "Youden Val = (", round(fpr_val,3), ", ", round(tpr_val,3), ")\n",
+        "Youden Test = (", round(fpr_test,3), ", ", round(tpr_test,3), ")"
+      ),
+      color = "black", size = 4
+    )
+  
+  # --- Enregistrement si demandé ---
+  if (!is.null(file_path)) {
+    ggsave(filename = file_path, plot = roc_plot, width = 7, height = 6)
+  }
+  
+  return(list(
+    plot = roc_plot,
+    youden = list(
+      val = c(FPR = fpr_val, TPR = tpr_val),
+      test = c(FPR = fpr_test, TPR = tpr_test)
+    ),
+    auc = list(
+      val = auc_val, test = auc_test,
+      ci_val = ci_val, ci_test = ci_test
+    )
+  ))
+}
+
+
+```
+
+
+```{r}
+#---------------------------------------- Sélection de variables par régularisation --------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# STABILITY SELECTION (Bootstrap + Elastic Net\Lasso\rigde Logistic Regression)
+# ------------------------------------------------------------------------------
+#
+# OBJECTIF :
+# Sélection de variables robustes via bootstrap + régression logistique pénalisée.
+#
+# PRINCIPE :
+# - Bootstrap des données (classique ou stratifié)
+# - Ajustement d’un modèle Elastic Net (glmnet)
+# - Comptage de la fréquence de sélection des variables
+#
+# INTERPRÉTATION :
+# - Une variable est dite "stable" si elle est sélectionnée fréquemment
+#   dans les échantillons bootstrap.
+#
+# OPTIONS :
+# - balanced = FALSE : bootstrap classique
+# - balanced = TRUE  : bootstrap stratifié (recommandé si déséquilibre)
+#
+# PARAMÈTRES CLÉS :
+# - B         : nombre de bootstrap
+# - threshold : seuil de stabilité (ex : 0.6 = 60%)
+# - alpha     : Elastic Net (1 = LASSO, 0 = Ridge)
+#
+# SORTIE :
+# - frequency        : fréquence de sélection des variables
+# - stable_variables : variables retenues selon threshold
+#
+# UTILISATION :
+# res <- stability_selection(...)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Stability selection via bootstrap + Elastic Net logistic regression
+# (version flexible : bootstrap classique ou stratifié)
+# ------------------------------------------------------------------------------
+
+stability_selection <- function(
+  data,
+  formula,
+  B = 2000,
+  threshold = 0.5,
+  alpha = 0.5,
+  balanced = FALSE
+){
+
+  # Message informatif
+  if(balanced){
+    message("✔ Bootstrap STRATIFIÉ activé (balanced = TRUE)")
+  } else {
+    message("✔ Bootstrap CLASSIQUE activé (balanced = FALSE)")
+  }
+
+  # Design matrix globale pour noms de variables
+  x_full <- model.matrix(formula, data = data)[, -1]
+  vars <- colnames(x_full)
+
+  response_name <- all.vars(formula)[1]
+
+  # Stockage des sélections
+  selected <- matrix(0, nrow = B, ncol = length(vars))
+  colnames(selected) <- vars
+
+  for(i in 1:B){
+
+    y <- data[[response_name]]
+
+    # -------------------------------------------------------
+    # Bootstrap (classique ou stratifié)
+    # -------------------------------------------------------
+    if(balanced){
+
+      idx0 <- sample(which(y == 0), replace = TRUE)
+      idx1 <- sample(which(y == 1), replace = TRUE)
+      idx <- c(idx0, idx1)
+
+    } else {
+
+      idx <- sample(1:nrow(data), replace = TRUE)
+
+    }
+
+    data_boot <- data[idx, ]
+
+    # -------------------------------------------------------
+    # Matrice design
+    # -------------------------------------------------------
+    x_boot <- model.matrix(formula, data_boot)[, -1]
+    y_boot <- data_boot[[response_name]]
+
+    # sécurité minimale
+    if(length(unique(y_boot)) < 2) next
+
+    # -------------------------------------------------------
+    # Elastic Net logistique
+    # -------------------------------------------------------
+    model <- cv.glmnet(
+      x_boot,
+      y_boot,
+      family = "binomial",
+      alpha = alpha
+    )
+
+    coef_boot <- coef(model, s = "lambda.min")
+
+    sel <- rownames(coef_boot)[coef_boot[, 1] != 0]
+    sel <- setdiff(sel, "(Intercept)")
+
+    selected[i, sel] <- 1
+  }
+
+  # -------------------------------------------------------
+  # Résultats
+  # -------------------------------------------------------
+  freq <- colMeans(selected)
+  stable_vars <- names(freq[freq >= threshold])
+
+  return(list(
+    frequency = freq,
+    stable_variables = stable_vars
+  ))
+}
+```
+
+

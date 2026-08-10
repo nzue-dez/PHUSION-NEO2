@@ -4,7 +4,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Bibliothèque personnelle de fonctions
-source("/Users/kouadio/Desktop/DOSSIERS BUREAU/ENSEMBLE_FONCTIONS/charger_fonctions.R")
+#source("/Users/kouadio/Desktop/DOSSIERS BUREAU/ENSEMBLE_FONCTIONS/charger_fonctions.R")
+source(here::here("R/fonctions/charger_fonctions.R"))
 
 # Packages du projet
 library(broom)

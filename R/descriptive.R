@@ -5,8 +5,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Tableau 1 (variables quantitatives)
-vars_quant1 = c("term_cal","pd_n","crib")
-
 lab_quant1 <- list(
   term_cal = "GA at birth (weeks)",
   pd_n     = "Birthweight (g)",
@@ -21,8 +19,6 @@ table_to_word(df1,
 
 
 # Tableau 1 (variables qualitatives)
-vars_qual1 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","prmloc")
-
 vars_qual_lab1 <- list(
   grp_term_cal = "GA at birth, week, n (%)",
   sex          = "Gender, n (%)",
@@ -43,8 +39,6 @@ table_to_word(df1,
 
 
 # Tableau 2 (variables quantitatives)
-vars_quant2 = c("somcu_int","somcu_vni","cortico_gene_doz")
-
 lab_quant2 <- list(
   somcu_int        = "Cumulated duration of invasive ventilation (d)",
   somcu_vni        = "Cumulated duration of non-invasive ventilation (d)",
@@ -58,9 +52,6 @@ table_to_word(df1,
 
 
 # Tableau 2 (variables qualitatives)
-vars_qual2 = c("dec_ou_dbp_36sa","dec_36sa","dbp_36sa","cortico_tard","pneu_tho","hemo_pulm",
-               "hiv_plus_lpmv","cnl_ttt","ca_opr","noso","ecun","perfo_isl","dec_s","chir_lser")
-
 lab_qual2 <- list(
   dec_ou_dbp_36sa = "Death or DBP at 36 weeks, n (%)",
   dec_36sa        = "Death at 36 weeks, n (%)",

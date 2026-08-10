@@ -1,0 +1,1484 @@
+---
+title: "Fonctions utilitaires — Typage, transformation & manipulation"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX — 01_utilitaires.Rmd
+# =============================================================================
+#
+# TYPAGE DES VARIABLES
+#   var_chr                    — Lister les variables de type character
+#   var_factor                 — Lister les variables de type factor
+#   var_num                    — Lister les variables numériques
+#   get_vars_type              — Lister variables par classe (inherits)
+#   get_vars_pattern           — Sélectionner variables par motif dans leur nom
+#
+# TRANSFORMATION DES VARIABLES
+#   transform_to_numeric       — Convertir des variables en numérique
+#   transform_to_factor        — Convertir en facteur avec labels personnalisés
+#   convert_posixct_to_date    — Convertir POSIXct → Date
+#   standardize_vars           — Standardisation (z-score) sélective
+#   standardize_data           — Centrer-réduire toutes les variables numériques
+#
+# MANIPULATION DU DATA.FRAME
+#   remove_obs_multi_vars      — Supprimer observations selon conditions (OR/AND)
+#   get_variable_positions     — Positions des variables dans un data.frame
+#   select_between             — Sélectionner colonnes entre deux variables
+#   select_vars                — Sélectionner colonnes par motifs
+#   check_vars_table           — Vérifier la présence de variables
+#   filter_by_pattern_multi    — Filtrer observations par motifs texte
+#   filter_by_two_patterns     — Filtrer sur deux variables texte simultanément
+#   check_and_extract          — Vérifier et extraire lignes par identifiants
+#   replace_char_multiple      — Remplacer valeurs dans plusieurs colonnes
+#   detect_vars_with_value_patterns — Détecter colonnes contenant des valeurs cibles
+# =============================================================================
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+if(!require(ggplot2))    install.packages("ggplot2")    
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (14)
+# ------------------------------------------------------------------
+# Fonction : var_chr
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction identifie les variables de type caractère dans un
+# data.frame. Elle renvoie la liste des noms de colonnes correspondant
+# aux variables qualitatives codées en character.
+#
+# Arguments :
+# - data : data.frame à analyser
+#
+# Fonctionnement :
+# - Parcourt toutes les colonnes du data.frame
+# - Vérifie le type de chaque variable avec is.character()
+# - Construit un vecteur contenant les noms des colonnes de type caractère
+#
+# Sortie :
+# - Vecteur de noms de variables de type character
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Utile pour sélectionner automatiquement les variables qualitatives
+#   codées en character avant un traitement ou un reporting
+# ------------------------------------------------------------------
+var_chr <- function(data) names(Filter(is.character, data))
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : var_factor
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction identifie les variables de type factor dans un
+# data.frame. Elle renvoie la liste des noms de colonnes correspondant
+# aux variables catégorielles codées en facteur.
+#
+# Arguments :
+# - data : data.frame à analyser
+#
+# Fonctionnement :
+# - Parcourt toutes les colonnes du data.frame
+# - Vérifie le type de chaque variable avec is.factor()
+# - Construit un vecteur contenant les noms des colonnes de type factor
+#
+# Sortie :
+# - Vecteur de noms de variables de type factor
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Utile pour sélectionner automatiquement les variables catégorielles
+#   codées en factor avant un traitement ou un reporting
+# ------------------------------------------------------------------
+var_factor <- function(data) names(Filter(is.factor, data))
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (15)
+# ------------------------------------------------------------------
+# Fonction : var_num
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction identifie les variables numériques dans un data.frame.
+# Elle renvoie la liste des noms de colonnes correspondant aux variables
+# de type numeric.
+#
+# Arguments :
+# - data : data.frame à analyser
+#
+# Fonctionnement :
+# - Parcourt toutes les colonnes du data.frame
+# - Vérifie le type de chaque variable avec is.numeric()
+# - Construit un vecteur contenant les noms des colonnes de type numérique
+#
+# Sortie :
+# - Vecteur de noms de variables numériques
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Utile pour sélectionner automatiquement les variables quantitatives
+#   avant un traitement ou un reporting
+# ------------------------------------------------------------------
+var_num <- function(data) names(Filter(is.numeric, data))
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (16)
+# ------------------------------------------------------------------
+# Fonction : transform_to_numeric
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction convertit un ensemble de variables d’un data.frame
+# en type numérique. Elle prévient si certaines variables spécifiées
+# n’existent pas dans le data.frame.
+#
+# Arguments :
+# - data : data.frame contenant les variables à convertir
+# - vars : vecteur de noms de variables à transformer en numeric
+#
+# Fonctionnement :
+# - Parcourt la liste des variables spécifiées
+# - Vérifie si chaque variable existe dans le data.frame
+#     → si oui, conversion en numeric via as.numeric()
+#     → si non, affiche un avertissement
+#
+# Sortie :
+# - Data.frame avec les variables converties en numérique
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Les valeurs non convertibles deviennent NA
+# - Utile pour préparer des variables avant analyses quantitatives
+# ------------------------------------------------------------------
+transform_to_numeric <- function(data, vars){
+  for (v in vars) {
+    if (v %in% names(data)) {
+      data[[v]] <- as.numeric(data[[v]])
+    } else {
+      warning(paste("La variable", v, "n'existe pas dans le data."))
+    }
+  }
+  return(data)
+}
+
+```
+
+
+```{r}
+# Fonction permettant d’identifier et d’extraire les noms des variables d’un jeu de données
+# en fonction de leur type (classe R).
+# La fonction utilise inherits() afin de détecter de manière robuste les classes,
+# y compris en cas d’héritage (ex : POSIXct pour les dates).
+# Arguments :
+# - df   : jeu de données (data.frame ou tibble)
+# - type : type recherché (ex : "character", "numeric", "logical", "POSIXct", "Date")
+# Retour :
+# - vecteur contenant les noms des variables correspondant au type spécifié
+get_vars_type <- function(df, type) {
+  names(df)[sapply(df, function(x) inherits(x, type))]
+}
+
+```
+
+
+```{r}
+# -------------------------------------------------------------------------
+# Fonction : convert_posixct_to_date
+# -------------------------------------------------------------------------
+# Objectif :
+# Cette fonction permet de convertir des variables de type POSIXct
+# (date + heure) en variables de type Date (date seule), avec un format
+# choisi par l’utilisateur.
+#
+# Elle est utile pour simplifier les variables temporelles lorsque
+# l’heure n’est pas nécessaire pour l’analyse.
+#
+# Principe :
+# - Identifie les colonnes de type POSIXct dans un data.frame
+# - Les convertit en format Date via as.Date()
+# - Permet de conserver uniquement la composante "date"
+#
+# Arguments :
+# - df     : data.frame ou tibble contenant les variables
+# - format : format de date souhaité (ex : "%Y-%m-%d")
+#
+# Retour :
+# - data.frame avec les variables POSIXct converties en Date
+#
+# Exemple d’utilisation :
+# df1 <- convert_posixct_to_date(df1, format = "%Y-%m-%d")
+# -------------------------------------------------------------------------
+convert_posixct_to_date <- function(df, format = "%Y-%m-%d") {
+  
+  posix_vars <- names(df)[sapply(df, function(x) inherits(x, "POSIXct"))]
+  
+  df[posix_vars] <- lapply(df[posix_vars], function(x) {
+    as.Date(x, format = format)
+  })
+  
+  return(df)
+}
+```
+
+
+```{r}
+# -------------------------------------------------------------------------
+# Fonction : get_vars_pattern
+# -------------------------------------------------------------------------
+# Objectif :
+# Cette fonction permet d’identifier et d’extraire les noms des variables
+# d’un jeu de données en fonction de motifs présents dans leurs noms.
+#
+# Elle est particulièrement utile pour le recodage ou le nettoyage de bases
+# de données contenant des variables aux conventions de nommage homogènes
+# (ex : préfixes, suffixes ou mots-clés dans les noms de variables).
+#
+# Logique :
+# La sélection repose sur une logique d’inclusion (OU) :
+# une variable est retenue si elle vérifie AU MOINS une des conditions suivantes :
+#   - commence par un ou plusieurs motifs définis (start)
+#   - contient un ou plusieurs motifs définis (contain)
+#   - se termine par un ou plusieurs motifs définis (end)
+#
+# Arguments :
+# - vars    : vecteur de noms de variables (ex : names(df))
+# - start   : vecteur de motifs au début du nom (optionnel)
+# - end     : vecteur de motifs en fin de nom (optionnel)
+# - contain : vecteur de motifs contenus dans le nom (optionnel)
+#
+# Retour :
+# - vecteur de caractères contenant les noms des variables sélectionnées
+#
+# Exemple d’utilisation :
+# vars_num <- names(df1)[sapply(df1, is.numeric)]
+#
+# Sélection des variables suspectes dans les variables numériques :
+# get_vars_pattern(
+#   vars_num,
+#   start = c("adm_", "prlvt_"),
+#   contain = c("sexe", "vaccin", "symptome")
+# )
+#
+# -------------------------------------------------------------------------
+get_vars_pattern <- function(vars, start = NULL, end = NULL, contain = NULL) {
+  
+  cond_start <- if (!is.null(start)) {
+    grepl(paste0("^(", paste(start, collapse = "|"), ")"), vars)
+  } else rep(FALSE, length(vars))
+  
+  cond_end <- if (!is.null(end)) {
+    grepl(paste0("(", paste(end, collapse = "|"), ")$"), vars)
+  } else rep(FALSE, length(vars))
+  
+  cond_contain <- if (!is.null(contain)) {
+    grepl(paste(contain, collapse = "|"), vars)
+  } else rep(FALSE, length(vars))
+  
+  vars[cond_start | cond_end | cond_contain]
+}
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (17)
+# ------------------------------------------------------------
+# Fonction : transform_to_factor
+# ------------------------------------------------------------
+# Description :
+# Cette fonction transforme une ou plusieurs variables d’un 
+# data.frame en facteurs (variables catégorielles). 
+# Elle permet d’assigner des labels personnalisés aux niveaux
+# si fournis, sinon se contente de transformer les valeurs
+# existantes en facteurs.
+#
+# Arguments :
+# - data        : data.frame contenant les variables à transformer
+# - vars        : vecteur de noms de variables à convertir en facteur
+# - labels_list : liste nommée associant chaque variable à un vecteur 
+#                 de labels pour ses niveaux (optionnel). Si NULL ou
+#                 non fourni pour une variable, as.factor() est utilisé.
+#
+# Valeur retournée :
+# Un data.frame identique à l’entrée, avec les variables spécifiées
+# transformées en facteurs.
+#
+# Détails :
+# - Vérifie que chaque variable existe dans le data.frame. 
+#   Si une variable est absente, un warning est affiché et 
+#   la fonction continue.
+# - Si des labels personnalisés sont fournis :
+#     - Le nombre de labels doit correspondre au nombre de niveaux
+#       uniques dans la variable
+#     - Les valeurs sont triées avant d’appliquer les labels
+# - Si aucun label n’est fourni pour une variable, la transformation
+#   par défaut as.factor() est appliquée.
+# - Les autres variables du data.frame restent inchangées.
+#
+# Exemples :
+# df <- transform_to_factor(df, vars = c("var1", "var2"))
+# df <- transform_to_factor(df, vars = c("var1"),
+#                           labels_list = list(var1 = c("Low","Medium","High")))
+#
+# Auteur : [D. KOUADIO]
+# ------------------------------------------------------------
+##########################################################################################################################
+#/ Cette fonction est utile pour non seulement convertir des variables en qualitatives mais aussi d'allouer de manière explicite des labels aux différentes modalités de ses variables, si l'on le souhaite.
+# Ex. Supposons une variable quantitative ou caractère, v1, contenue dans "vars" (vars <- c("v1")). On sait de plus que v1 ne prend que deux valeurs 0 et 1 (v1 <- c(0,1)) si quantitative. Le "labels_list" associé est le vecteur
+#/ c <- c("Non","Oui"). L'attribution d'étiquête label est réalisé da,s l'ordre c'est-à-dire que "Non" remplace 0 et "Oui" remplace 1.
+transform_to_factor <- function(data, vars, labels_list = NULL) { 
+  
+  for (v in vars) {
+    
+    if (!v %in% names(data)) {
+      warning(paste("La variable", v, "n'existe pas dans le data"))
+      next
+    }
+    
+    # Cas 1 : labels fournis pour cette variable
+    if (!is.null(labels_list) && !is.null(labels_list[[v]])) {
+      
+      lv <- sort(unique(data[[v]]))
+      
+      if (length(labels_list[[v]]) != length(lv)) {
+        stop(paste("Le nombre de labels pour", v, 
+                   "ne correspond pas au nombre de niveaux."))
+      }
+      
+      data[[v]] <- factor(
+        data[[v]],
+        levels = lv,
+        labels = labels_list[[v]]
+      )
+      
+    } else {
+      # Cas 2 : aucun label → comportement par défaut de as.factor()
+      data[[v]] <- as.factor(data[[v]])
+    }
+  }
+  
+  return(data)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------
+# Fonction : standardize_data
+# ------------------------------------------------------------
+# Description :
+# Cette fonction permet de centrer et réduire automatiquement
+# toutes les variables numériques d’un data.frame.
+# Les variables non numériques (facteurs, caractères, etc.)
+# sont laissées inchangées.
+#
+# La standardisation consiste à transformer chaque variable X en :
+# (X - moyenne) / écart-type
+#
+# L’utilisateur peut choisir la formule de l’écart-type :
+# - "n-1" : estimateur empirique corrigé (recommandé en statistique)
+# - "n"   : estimateur de population (souvent utilisé en machine learning)
+#
+# Arguments :
+# - data  : data.frame contenant les variables à standardiser
+# - denom : caractère indiquant le dénominateur pour la variance :
+#           "n-1" (par défaut) ou "n"
+#
+# Valeur retournée :
+# Un data.frame de même dimension que l’entrée, avec les variables
+# numériques centrées et réduites. Les variables non numériques
+# sont inchangées.
+#
+# Détails :
+# - Les valeurs manquantes (NA) sont ignorées dans les calculs
+# - Si une variable a une variance nulle (valeurs constantes),
+#   elle n’est pas transformée
+# - Si une variable contient moins de 2 observations non manquantes,
+#   elle est laissée inchangée
+#
+# Exemples :
+# df_std <- standardize_data(df, denom = "n-1")  # usage statistique
+# df_std <- standardize_data(df, denom = "n")    # usage machine learning
+#
+# Auteur : [D. KOUADIO]
+# ------------------------------------------------------------
+
+standardize_data <- function(data, denom = c("n-1", "n")) {
+  
+  denom <- match.arg(denom)
+  
+  # Fonction de standardisation pour un vecteur
+  standardize_vector <- function(x) {
+    if (!is.numeric(x)) return(x)
+    
+    m <- mean(x, na.rm = TRUE)
+    n <- sum(!is.na(x))
+    
+    if (n <= 1) return(x)  # sécurité si pas assez de données
+    
+    if (denom == "n-1") {
+      sd_x <- sqrt(sum((x - m)^2, na.rm = TRUE) / (n - 1))
+    } else {
+      sd_x <- sqrt(sum((x - m)^2, na.rm = TRUE) / n)
+    }
+    
+    if (sd_x == 0 || is.na(sd_x)) return(x)  # 
+    
+    return((x - m) / sd_x)
+  }
+  
+  # Appliquer à toutes les colonnes
+  data[] <- lapply(data, standardize_vector)
+  
+  return(data)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : standardize_vars
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction standardise (centre et réduit) un ensemble de variables
+# numériques d’un data.frame. Chaque variable est transformée pour avoir
+# une moyenne de 0 et un écart-type de 1 (z-score).
+#
+# Arguments :
+# - data : data.frame contenant les données
+# - vars : vecteur des noms de variables à standardiser
+#
+# Fonctionnement :
+# - Vérifie que toutes les variables existent dans le data.frame
+# - Calcule pour chaque variable :
+#     → la moyenne (mean)
+#     → l’écart-type (sd)
+# - Applique la transformation :
+#     → (x - moyenne) / écart-type
+# - Les valeurs manquantes (NA) sont ignorées dans le calcul des statistiques
+#
+# Sortie :
+# - Retourne une liste contenant :
+#     $data  : data.frame avec variables standardisées
+#     $stats : tableau des moyennes et écarts-types utilisés
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Les variables doivent être numériques
+# - Si une variable a un écart-type nul, une division par zéro peut survenir
+# - Utile pour analyses multivariées (ACP, régression, clustering, etc.)
+# ------------------------------------------------------------------
+standardize_vars <- function(data, vars) {
+  
+  stopifnot(all(vars %in% names(data)))
+  
+  stats <- data.frame(
+    variable = vars,
+    mean = sapply(data[vars], mean, na.rm = TRUE),
+    sd   = sapply(data[vars], sd,   na.rm = TRUE)
+  )
+  
+  data_scaled <- data
+  for (v in vars) {
+    data_scaled[[v]] <- (data[[v]] - stats$mean[stats$variable == v]) /
+                         stats$sd[stats$variable == v]
+  }
+  
+  list(
+    data = data_scaled,
+    stats = stats
+  )
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------
+# Fonction : remove_obs_multi_vars
+# ------------------------------------------------------------
+# Description :
+# Cette fonction supprime des observations d’un data.frame en
+# fonction de conditions appliquées sur plusieurs variables.
+# Elle permet de combiner les conditions en mode "OR" ou "AND"
+# et fournit un résumé détaillé des observations supprimées.
+#
+# Arguments :
+# - df         : data.frame à nettoyer
+# - conditions : liste nommée où chaque élément correspond aux
+#                valeurs à considérer pour suppression pour
+#                une variable. Exemple : list(var1 = c("A","B"))
+# - var_B      : nom d’une variable dont les valeurs des
+#                observations supprimées seront résumées
+# - mode       : "OR" ou "AND" :
+#                - "OR"  : supprimer si **au moins une** condition
+#                          est satisfaite
+#                - "AND" : supprimer si **toutes** les conditions
+#                          sont satisfaites
+#
+# Valeur retournée :
+# Un data.frame nettoyé, sans les observations correspondant aux
+# conditions spécifiées.
+#
+# Détails :
+# - La fonction vérifie que toutes les variables de conditions
+#   et var_B existent dans le data.frame.
+# - Elle crée un indicateur logique pour chaque observation
+#   selon les conditions.
+# - Affiche un résumé des observations supprimées, indiquant :
+#     - numéro de ligne
+#     - combinaison de valeurs qui a déclenché la suppression
+#     - valeur de var_B pour cette observation
+# - Affiche également la liste des valeurs uniques de var_B
+#   supprimées.
+# - Si aucune observation n’est supprimée, un message en informe.
+#
+# Exemples :
+# df_clean <- remove_obs_multi_vars(
+#                df,
+#                conditions = list(var1 = c("A","B"), var2 = c("X")),
+#                var_B = "target_var",
+#                mode = "OR")
+#
+# df_clean <- remove_obs_multi_vars(
+#                df,
+#                conditions = list(var1 = "C", var2 = "Y"),
+#                var_B = "target_var",
+#                mode = "AND")
+#
+# Auteur : [D. KOUADIO]
+# ------------------------------------------------------------
+remove_obs_multi_vars <- function(
+  df,
+  conditions,
+  var_B,
+  mode = c("OR", "AND")
+) {
+
+  mode <- match.arg(mode)
+
+  # Vérifications
+  if (!is.list(conditions) || is.null(names(conditions))) {
+    stop("conditions doit être une liste nommée")
+  }
+
+  vars_cond <- names(conditions)
+
+  missing_vars <- setdiff(c(vars_cond, var_B), names(df))
+  if (length(missing_vars) > 0) {
+    stop("Variables absentes du data frame : ",
+         paste(missing_vars, collapse = ", "))
+  }
+
+  # Création des indicateurs logiques par variable
+  cond_matrix <- sapply(vars_cond, function(var) {
+    df[[var]] %in% conditions[[var]]
+  })
+
+  cond_matrix <- as.data.frame(cond_matrix)
+
+  # Combinaison des conditions
+  remove_flag <- if (mode == "OR") {
+    apply(cond_matrix, 1, any)
+  } else {
+    apply(cond_matrix, 1, all)
+  }
+
+  # Aucune suppression
+  if (!any(remove_flag)) {
+    message("Aucune observation supprimée")
+    return(df)
+  }
+
+  # Résumé des observations supprimées
+  removed_df <- df[remove_flag, , drop = FALSE]
+
+  summary_list <- lapply(seq_len(nrow(removed_df)), function(i) {
+    vals <- sapply(vars_cond, function(var) {
+      paste0(var, "=", removed_df[[var]][i])
+    })
+    paste(vals, collapse = " & ")
+  })
+
+  removed_summary <- data.frame(
+    row = which(remove_flag),
+    combination = unlist(summary_list),
+    B_value = removed_df[[var_B]],
+    stringsAsFactors = FALSE
+  )
+
+  # Messages
+  cat("\n-----------------------------\n")
+  cat("Suppression d'observations\n")
+  cat("Mode :", mode, "\n")
+  cat("-----------------------------\n\n")
+
+  for (i in seq_len(nrow(removed_summary))) {
+    cat(
+      "Observation", removed_summary$row[i], "→",
+      removed_summary$combination[i], "→",
+      var_B, "=", removed_summary$B_value[i], "\n"
+    )
+  }
+
+  cat("\nValeurs de", var_B, "supprimées :\n")
+  print(unique(removed_summary$B_value))
+
+  # Data nettoyée
+  df_clean <- df[!remove_flag, , drop = FALSE]
+
+  return(df_clean)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : get_variable_positions
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction retourne la position (indice de colonne) de chaque variable
+# spécifiée dans un data.frame et indique si elle existe ou non.
+#
+# Arguments :
+# - data : data.frame dans lequel chercher les variables
+# - vars : vecteur de noms de variables à localiser
+#
+# Fonctionnement :
+# 1. Vérifie que l'objet fourni est un data.frame
+# 2. Récupère les noms des colonnes
+# 3. Utilise match() pour trouver l'indice de chaque variable
+# 4. Crée un data.frame indiquant pour chaque variable :
+#       * son nom
+#       * sa position (NA si non trouvée)
+#       * un booléen 'exists' indiquant si la variable est présente
+# 5. Affiche un warning si certaines variables n'existent pas
+#
+# Sortie :
+# - data.frame avec colonnes : variable, position, exists
+#
+# Remarques :
+# - Pratique pour vérifier rapidement l'existence et l'ordre des variables
+#   avant d'effectuer des opérations sur le dataset
+# ------------------------------------------------------------------
+get_variable_positions <- function(data, vars) {
+  
+  # Vérification : data doit être un data.frame
+  if (!is.data.frame(data)) {
+    stop("L'objet fourni n'est pas un data.frame.")
+  }
+  
+  # Extraire les noms de colonne
+  cols <- colnames(data)
+  
+  # Chercher la position
+  pos <- match(vars, cols)
+  
+  # Construire un tableau propre
+  result <- data.frame(
+    variable = vars,
+    position = pos,
+    exists = !is.na(pos)
+  )
+  
+  # Message si des variables n'existent pas
+  if (any(is.na(pos))) {
+    warning("Certaines variables n'existent pas dans le dataset.")
+  }
+  
+  return(result)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : select_between
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction sélectionne un ensemble de colonnes consécutives dans
+# un data.frame, entre deux variables spécifiées.
+#
+# Arguments :
+# - data : data.frame source
+# - start_var : nom de la colonne de début
+# - end_var   : nom de la colonne de fin
+# - return_names : booléen, si TRUE retourne uniquement les noms des colonnes,
+#                  sinon retourne un data.frame avec les colonnes sélectionnées
+#
+# Fonctionnement :
+# 1. Vérifie que start_var et end_var existent dans le data.frame
+# 2. Récupère leur position dans les colonnes
+# 3. Si start_var vient après end_var, échange les positions
+# 4. Sélectionne toutes les colonnes comprises entre start_var et end_var
+# 5. Retourne soit :
+#       * le vecteur de noms si return_names = TRUE
+#       * le data.frame correspondant sinon
+#
+# Sortie :
+# - soit un vecteur de noms de colonnes
+# - soit un sous-data.frame contenant les colonnes sélectionnées
+#
+# Remarques :
+# - drop = FALSE est utilisé pour garder le format data.frame même si
+#   une seule colonne est sélectionnée.
+# ------------------------------------------------------------------
+select_between <- function(data, start_var, end_var, return_names = FALSE) {
+  cols <- colnames(data)
+  
+  if (!(start_var %in% cols && end_var %in% cols)) {
+    stop("start_var ou end_var n'existe pas dans le dataframe.")
+  }
+  
+  start_pos <- match(start_var, cols)
+  end_pos <- match(end_var, cols)
+  
+  if (start_pos > end_pos) {
+    tmp <- start_pos
+    start_pos <- end_pos
+    end_pos <- tmp
+  }
+  
+  selected <- cols[start_pos:end_pos]
+  
+  if (return_names) return(selected)
+  
+  return(data[, selected, drop = FALSE]) # drop = FALSE pour garantir un format data.frame même si c'est une seule variable qui est retournée.
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : select_vars
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction permet de sélectionner des colonnes dans un data.frame
+# en fonction de motifs sur les noms ou les labels des variables.
+#
+# Arguments :
+# - data : data.frame source
+# - patterns_list : liste de vecteurs de motifs (chaînes de caractères)
+# - types_list    : liste de vecteurs de types de correspondance pour chaque motif
+#                   types possibles : "contains", "starts", "ends", "exact"
+# - allowed_types : types autorisés (par défaut "contains", "starts", "ends", "exact")
+# - return_names  : booléen, si TRUE retourne uniquement les noms des colonnes
+# - ignore.case   : booléen, TRUE pour ignorer la casse lors du matching
+#
+# Fonctionnement :
+# 1. Vérifie que patterns_list et types_list ont la même longueur
+# 2. Vérifie que tous les types sont valides
+# 3. Récupère les noms de colonnes et leurs labels (attributs "label")
+# 4. Pour chaque bloc de motifs :
+#       a) Applique un AND entre motifs du bloc
+#       b) Applique un OR entre les blocs
+#       c) Le matching se fait sur les noms et sur les labels
+# 5. Retourne soit :
+#       - un vecteur de noms de colonnes si return_names = TRUE
+#       - un sous-data.frame avec les colonnes correspondantes sinon
+#
+# Notes :
+# - drop = FALSE garantit que le retour est un data.frame même si une seule variable est sélectionnée
+# - Si aucune variable ne correspond aux critères, un warning est généré
+# ------------------------------------------------------------------
+select_vars <- function(
+  data,
+  patterns_list,
+  types_list,
+  allowed_types = c("contains", "starts", "ends", "exact"),
+  return_names = FALSE,
+  ignore.case = TRUE
+) {
+  
+  # -----------------------------
+  # Vérifications générales
+  # -----------------------------
+  if (length(patterns_list) != length(types_list)) {
+    stop("patterns_list et types_list doivent avoir la même longueur")
+  }
+  
+  all_types <- unlist(types_list)
+  
+  if (any(!all_types %in% allowed_types)) {
+    stop(
+      "Types non autorisés détectés.\n",
+      "Types autorisés : ",
+      paste(allowed_types, collapse = ", ")
+    )
+  }
+  
+  # -----------------------------
+  # Noms et labels
+  # -----------------------------
+  vars <- colnames(data)
+  
+  labels <- sapply(vars, function(v) {
+    lab <- attr(data[[v]], "label")
+    if (is.null(lab)) "" else as.character(lab)
+  })
+  
+  # -----------------------------
+  # Fonction interne de matching
+  # -----------------------------
+  match_pattern <- function(x, pattern, type) {
+    
+    if (type == "contains") {
+      grepl(pattern, x, ignore.case = ignore.case)
+      
+    } else if (type == "starts") {
+      grepl(paste0("^", pattern), x, ignore.case = ignore.case)
+      
+    } else if (type == "ends") {
+      grepl(paste0(pattern, "$"), x, ignore.case = ignore.case)
+      
+    } else if (type == "exact") {
+      if (ignore.case) tolower(x) == tolower(pattern) else x == pattern
+    }
+  }
+  
+  # -----------------------------
+  # Sélection (AND dans bloc / OR entre blocs)
+  # -----------------------------
+  keep_global <- rep(FALSE, length(vars))
+  
+  for (i in seq_along(patterns_list)) {
+    
+    patterns <- patterns_list[[i]]
+    types    <- types_list[[i]]
+    
+    if (length(patterns) != length(types)) {
+      stop(
+        "Dans le bloc ", i,
+        " : patterns et types doivent avoir la même longueur"
+      )
+    }
+    
+    keep_block <- rep(TRUE, length(vars))
+    
+    for (j in seq_along(patterns)) {
+      pat  <- patterns[j]
+      type <- types[j]
+      
+      keep_rule <-
+        match_pattern(vars, pat, type) |
+        match_pattern(labels, pat, type)
+      
+      keep_block <- keep_block & keep_rule
+    }
+    
+    keep_global <- keep_global | keep_block
+  }
+  
+  # -----------------------------
+  # Sortie
+  # -----------------------------
+  selected <- vars[keep_global]
+  
+  if (length(selected) == 0) {
+    warning("Aucune variable ne correspond aux critères")
+  }
+  
+  if (return_names) return(selected)
+  
+  data[, selected, drop = FALSE] # drop = FALSE pour garantir un format data.frame même si c'est une seule variable qui est retournée.
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : check_vars_table
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction vérifie la présence d'une liste de variables dans un data.frame
+#
+# Arguments :
+# - data : un data.frame dans lequel chercher les variables
+# - vars : un vecteur de caractères correspondant aux noms de variables à vérifier
+#
+# Retour :
+# Un data.frame avec les colonnes :
+#   - variable : nom de la variable vérifiée
+#   - presente  : TRUE si la variable est présente, FALSE sinon
+#   - commentaire : texte indiquant si la variable est présente ou non
+#
+# Vérifications :
+# - data doit être un data.frame
+# - vars doit être un vecteur de caractères
+# ------------------------------------------------------------------
+check_vars_table <- function(data, vars) {
+
+  if (!is.data.frame(data)) {
+    stop("`data` doit être un data.frame")
+  }
+
+  if (!is.character(vars)) {
+    stop("`vars` doit être un vecteur de caractères")
+  }
+
+  presente <- vars %in% names(data)
+
+  commentaire <- ifelse(
+    presente,
+    "Présente dans la base",
+    "Non présente dans la base"
+  )
+
+  out <- data.frame(
+    variable = vars,
+    presente = presente,
+    commentaire = commentaire,
+    stringsAsFactors = FALSE
+  )
+
+  return(out)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : filter_by_pattern_multi
+# ------------------------------------------------------------------
+# Description :
+# Filtre un data.frame en recherchant plusieurs motifs dans une variable texte.
+# Permet d'utiliser différents types de correspondance (contains, starts, ends, exact)
+# et de combiner les motifs par logique AND ou OR.
+#
+# Arguments :
+# - data     : data.frame à filtrer
+# - id_var   : nom de la variable identifiant (sera conservée dans le résultat)
+# - var      : nom de la variable texte dans laquelle chercher les motifs
+# - patterns : vecteur de motifs à rechercher
+# - types    : type de correspondance pour chaque motif (contains, starts, ends, exact)
+# - logic    : "AND" ou "OR" pour combiner les conditions
+#
+# Retour :
+# - data.frame avec uniquement les colonnes id_var et var, pour les lignes correspondant aux motifs
+# ------------------------------------------------------------------
+filter_by_pattern_multi <- function(
+  data,
+  id_var = "id_patient",
+  var,
+  patterns,
+  types = c("contains", "starts", "ends", "exact"),
+  logic = c("AND", "OR")
+) {
+  
+  # Vérifications
+  logic <- match.arg(logic)
+  
+  if (!var %in% names(data)) stop("var n'existe pas dans data.")
+  if (!id_var %in% names(data)) stop("id_var n'existe pas dans data.")
+  if (length(patterns) != length(types)) stop("patterns et types doivent avoir la même longueur.")
+  
+  # Fonction interne pour construire la regex
+  build_regex <- function(pattern, type){
+    switch(type,
+           contains = paste0(".*", pattern, ".*"),
+           starts   = paste0("^", pattern),
+           ends     = paste0(pattern, "$"),
+           exact    = paste0("^", pattern, "$"),
+           stop("type inconnu")
+    )
+  }
+  
+  # Création d'une liste logique pour chaque condition
+  conditions <- mapply(function(pat, typ){
+    regex <- build_regex(pat, typ)
+    grepl(regex, data[[var]], ignore.case = TRUE)
+  },
+  patterns, types, SIMPLIFY = FALSE)
+  
+  # Combinaison des conditions
+  if (logic == "AND") {
+    selected_rows <- Reduce(`&`, conditions)
+  } else {
+    selected_rows <- Reduce(`|`, conditions)
+  }
+  
+  # Sortie
+  return(data[selected_rows, c(id_var, var), drop = FALSE])
+}
+
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : filter_by_two_patterns
+# ------------------------------------------------------------------
+# Description :
+# Filtre un data.frame en recherchant simultanément un motif dans deux variables texte.
+# Permet d'utiliser différents types de correspondance (contains, starts, ends, exact)
+# et de combiner les motifs par logique AND ou OR.
+#
+# Arguments :
+# - data     : data.frame à filtrer
+# - id_var   : nom de la variable identifiant (sera conservée dans le résultat)
+# - var1     : première variable texte dans laquelle chercher pattern1
+# - pattern1 : motif pour la première variable
+# - type1    : type de correspondance pour pattern1 (contains, starts, ends, exact)
+# - var2     : deuxième variable texte dans laquelle chercher pattern2
+# - pattern2 : motif pour la deuxième variable
+# - type2    : type de correspondance pour pattern2 (contains, starts, ends, exact)
+# - logic    : "AND" ou "OR" pour combiner les deux conditions
+#
+# Retour :
+# - data.frame avec uniquement les colonnes id_var, var1 et var2, pour les lignes correspondant aux motifs
+# ------------------------------------------------------------------
+filter_by_two_patterns <- function(
+  data,
+  id_var = "id_patient",
+  var1, pattern1, type1 = c("contains", "starts", "ends", "exact"),
+  var2, pattern2, type2 = c("contains", "starts", "ends", "exact"),
+  logic = c("AND", "OR")
+) {
+  
+  type1  <- match.arg(type1)
+  type2  <- match.arg(type2)
+  logic  <- match.arg(logic)
+  
+  # Vérifications
+  if (!var1 %in% colnames(data)) stop("La variable var1 n'existe pas dans data.")
+  if (!var2 %in% colnames(data)) stop("La variable var2 n'existe pas dans data.")
+  if (!id_var %in% colnames(data)) stop("La variable id_var n'existe pas dans data.")
+  
+  # Création de la regex
+  build_regex <- function(pattern, type) {
+    switch(type,
+           contains = paste0(".*", pattern, ".*"),
+           starts   = paste0("^", pattern),
+           ends     = paste0(pattern, "$"),
+           exact    = paste0("^", pattern, "$")
+    )
+  }
+  
+  regex1 <- build_regex(pattern1, type1)
+  regex2 <- build_regex(pattern2, type2)
+  
+  cond1 <- grepl(regex1, data[[var1]], ignore.case = TRUE)
+  cond2 <- grepl(regex2, data[[var2]], ignore.case = TRUE)
+  
+  # AND ou OR
+  selected <- if (logic == "AND") {
+    cond1 & cond2
+  } else {
+    cond1 | cond2
+  }
+  
+  # Retour : id_patient + var1 + var2
+  return(data[selected, c(id_var, var1, var2), drop = FALSE])
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : check_and_extract
+# ------------------------------------------------------------------
+# Description :
+# Vérifie la présence d'identifiants dans un data.frame et extrait
+# les lignes correspondantes avec une variable descriptive.
+#
+# Arguments :
+# - data     : data.frame contenant au moins id_var et desc_var
+# - ids      : vecteur d'identifiants à vérifier/extraire
+# - id_var   : nom de la colonne identifiant (par défaut "id_patient")
+# - desc_var : nom de la colonne descriptive (par défaut "patho_description")
+#
+# Retour :
+# - data.frame avec uniquement les colonnes id_var et desc_var pour les IDs existants
+# - Message indiquant les IDs manquants dans la base
+# ------------------------------------------------------------------
+check_and_extract <- function(data, ids, 
+                              id_var = "id_patient", 
+                              desc_var = "patho_description") {
+  
+  # Vérifier que les colonnes existent
+  if (!id_var %in% names(data)) stop("La colonne id_patient n'existe pas.")
+  if (!desc_var %in% names(data)) stop("La colonne patho_description n'existe pas.")
+  
+  # IDs présents et absents
+  ids_in_data <- ids[ids %in% data[[id_var]]]
+  ids_missing <- ids[!(ids %in% data[[id_var]])]
+  
+  # Message pour les identifiants manquants
+  if (length(ids_missing) > 0) {
+    message("⚠️ Identifiants inexistants dans la base : ", paste(ids_missing, collapse = ", "))
+  } else {
+    message("✔️ Tous les identifiants fournis existent dans la base.")
+  }
+  
+  # Extraction des lignes correspondantes
+  result <- data[data[[id_var]] %in% ids_in_data, c(id_var, desc_var), drop = FALSE]
+  
+  return(result)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : replace_char_multiple
+# ==============================================================
+# Description :
+# Permet de remplacer des valeurs dans plusieurs colonnes d'un data.frame,
+# avec options de condition, de remplacement par NA, de conversion en numérique,
+# et d'utilisation de regex ou d'ignorance de la casse.
+#
+# Arguments :
+# - data           : data.frame à modifier
+# - replacements   : liste nommée, chaque élément correspondant à une variable
+#     Chaque élément est une liste avec :
+#       - char            : vecteur des valeurs à remplacer
+#       - replacement     : vecteur des valeurs de remplacement (ou longueur 1)
+#       - convert_numeric : TRUE/FALSE pour reconvertir la colonne en numérique
+#       - condition       : liste avec logique 'and'/'or' et 'rules' pour filtrer
+# - ignore_case    : TRUE/FALSE pour ignorer la casse dans la recherche
+# - regex          : TRUE/FALSE pour utiliser char comme expression régulière
+#
+# Retour :
+# - data.frame modifié
+# ==============================================================
+replace_char_multiple <- function(
+  data,
+  replacements,
+  ignore_case = FALSE,
+  regex = FALSE
+) {
+  # Vérifications générales
+  if (!is.data.frame(data)) stop("data doit être un data.frame.")
+  if (!is.list(replacements)) stop("replacements doit être une liste nommée.")
+  
+  for (varname in names(replacements)) {
+    
+    if (!varname %in% names(data)) {
+      stop(paste0("Variable '", varname, "' non trouvée dans le data.frame."))
+    }
+    
+    info <- replacements[[varname]]
+    
+    char_vals <- info$char
+    rep_vals  <- if (!is.null(info$replacement)) info$replacement else ""
+    convert_numeric <- if (!is.null(info$convert_numeric)) info$convert_numeric else FALSE
+    condition <- if (!is.null(info$condition)) info$condition else NULL
+    
+    # Recyclage des replacements
+    if (length(rep_vals) == 1 && length(char_vals) > 1) {
+      rep_vals <- rep(rep_vals, length(char_vals))
+    }
+    
+    if (length(char_vals) != length(rep_vals)) {
+      stop(
+        paste(
+          "Pour la variable", varname,
+          ": 'char' et 'replacement' doivent avoir la même longueur",
+          "ou 'replacement' de longueur 1."
+        )
+      )
+    }
+    
+    # Colonne traitée comme caractère
+    col <- as.character(data[[varname]])
+    
+    # ----------------------------
+    # Construction de l'index conditionnel
+    # ----------------------------
+    
+    if (is.null(condition)) {
+      idx <- seq_len(nrow(data))
+    } else {
+      if (is.null(condition$logic) || is.null(condition$rules)) {
+        stop("La condition doit contenir 'logic' ('and'/'or') et 'rules'.")
+      }
+      
+      logic_global <- condition$logic
+      if (!logic_global %in% c("and", "or")) {
+        stop("condition$logic doit être 'and' ou 'or'.")
+      }
+      
+      idx_global <- if (logic_global == "and") {
+        rep(TRUE, nrow(data))
+      } else {
+        rep(FALSE, nrow(data))
+      }
+      
+      for (rule in condition$rules) {
+        if (is.null(rule$var) || is.null(rule$values)) {
+          stop("Chaque règle doit contenir 'var' et 'values'.")
+        }
+        
+        if (length(rule$var) != length(rule$values)) {
+          stop("Dans chaque règle, 'var' et 'values' doivent avoir la même longueur.")
+        }
+        
+        if (!all(rule$var %in% names(data))) {
+          stop("Une ou plusieurs variables de condition ne sont pas dans le data.frame.")
+        }
+        
+        idx_rule <- rep(TRUE, nrow(data))
+        for (j in seq_along(rule$var)) {
+          idx_rule <- idx_rule & (data[[rule$var[j]]] == rule$values[j])
+        }
+        
+        if (logic_global == "or") {
+          idx_global <- idx_global | idx_rule
+        } else {
+          idx_global <- idx_global & idx_rule
+        }
+      }
+      
+      idx <- which(idx_global)
+    }
+    
+    # ----------------------------
+    # Application des remplacements
+    # ----------------------------
+    
+    for (i in seq_along(char_vals)) {
+      
+      char <- char_vals[i]
+      replacement <- rep_vals[i]
+      
+      if (char == "") {
+        # Remplacement des cellules vides ou NA
+        empty_idx <- grepl("^\\s*$", col[idx]) | is.na(col[idx])
+        
+        if (is.na(replacement)) {
+          col[idx][empty_idx] <- NA
+        } else {
+          col[idx][empty_idx] <- replacement
+        }
+        
+      } else {
+        # grepl/gsub avec fixed=TRUE ignore ignore.case (comportement R documenté).
+        # Quand ignore_case=TRUE et regex=FALSE, on échappe le motif et on passe
+        # fixed=FALSE pour que ignore.case soit effectivement respecté.
+        use_fixed <- !regex && !ignore_case
+        pat <- if (!regex && ignore_case)
+          gsub("([.^$*+?{}|\\[\\]()|\\\\])", "\\\\\\1", char)
+        else
+          char
+
+        matches <- grepl(pat, col[idx], fixed = use_fixed, ignore.case = ignore_case)
+
+        if (is.na(replacement)) {
+          col[idx][matches] <- NA
+        } else {
+          col[idx][matches] <- gsub(
+            pat,
+            replacement,
+            col[idx][matches],
+            fixed = use_fixed,
+            ignore.case = ignore_case
+          )
+        }
+      }
+    }
+    
+    # Reconversion numérique si demandée
+    if (convert_numeric) {
+      suppressWarnings(col <- as.numeric(col))
+    }
+    
+    data[[varname]] <- col
+  }
+  
+  return(data)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : detect_vars_with_value_patterns
+# ==============================================================
+# Description :
+# Permet de détecter, dans un data.frame, quelles colonnes contiennent 
+# certaines valeurs selon des motifs définis par des règles.
+# Les colonnes doivent être de type caractère ou factor.
+#
+# Arguments :
+# - data         : data.frame dans lequel rechercher
+# - rules        : liste de règles. Chaque règle est une liste contenant :
+#       - values : vecteur de valeurs à rechercher
+#       - types  : vecteur de types de recherche correspondants ("contains", "exact", "starts", "ends")
+#       - label  : étiquette ou nom de la règle
+# - include_na   : TRUE/FALSE, si TRUE, considère aussi les NA comme correspondants
+# - return_table : TRUE/FALSE, si TRUE renvoie un data.frame complet avec matches, sinon une liste filtrée
+#
+# Retour :
+# - Par défaut : liste nommée avec les colonnes détectées et les valeurs correspondantes
+# - Si return_table = TRUE : data.frame avec colonnes "variable", "detected" et "matches"
+#
+# Détails du fonctionnement :
+# 1. Vérifie que 'data' est un data.frame et 'rules' une liste.
+# 2. Définit les types autorisés : "contains", "exact", "starts", "ends".
+# 3. Fonction interne match_pattern() : teste la correspondance d'une valeur avec un type donné.
+# 4. Fonction interne check_column() :
+#       - Convertit la colonne en caractère
+#       - Pour chaque règle, applique toutes les conditions sur la colonne
+#       - Si au moins une ligne satisfait toutes les conditions, stocke la règle et les valeurs correspondantes
+#       - Renvoie pour chaque colonne : detected = TRUE/FALSE, matches = liste des correspondances
+# 5. Applique check_column à toutes les colonnes de 'data'.
+# 6. Compile les résultats :
+#       - detected : vecteur logique des colonnes détectées
+#       - matches : liste des correspondances
+# 7. Sortie :
+#       - Si return_table = TRUE : data.frame avec colonne, detected, matches
+#       - Sinon : liste filtrée des colonnes détectées avec leurs matches
+# ==============================================================
+detect_vars_with_value_patterns <- function(
+  data,
+  rules,
+  include_na = FALSE,
+  return_table = FALSE
+) {
+  if (!is.data.frame(data)) stop("data doit être un data.frame.")
+  if (!is.list(rules)) stop("rules doit être une liste.")
+  
+  allowed_types <- c("contains", "exact", "starts", "ends")
+  match_pattern <- function(x, value, type) {
+    if (type == "contains") {
+      grepl(value, x, fixed = TRUE)
+    } else if (type == "exact") {
+      x == value
+    } else if (type == "starts") {
+      grepl(paste0("^", value), x)
+    } else if (type == "ends") {
+      grepl(paste0(value, "$"), x)
+    } else {
+      stop("Type non reconnu : ", type)
+    }
+  }
+  
+  check_column <- function(col) {
+    if (!(is.character(col) || is.factor(col))) {
+      return(list(detected = FALSE, matches = list()))
+    }
+    
+    col_ch <- as.character(col)
+    matches <- list()
+    
+    for (rule in rules) {
+      
+      values <- rule$values
+      types  <- rule$types
+      label  <- rule$label
+      
+      if (length(values) != length(types)) {
+        stop("values et types doivent avoir la même longueur")
+      }
+      if (any(!types %in% allowed_types)) {
+        stop("Types autorisés : ", paste(allowed_types, collapse = ", "))
+      }
+      
+      conds <- mapply(function(val, tp) {
+        r <- match_pattern(col_ch, val, tp)
+        if (include_na) r <- r | is.na(col_ch)
+        r
+      }, values, types)
+      
+      # une valeur satisfait toutes les conditions de la règle
+      rows_ok <- apply(conds, 1, all)
+      
+      if (any(rows_ok, na.rm = TRUE)) {
+        matches[[length(matches) + 1]] <- list(
+          label = label,
+          matched_values = unique(col_ch[rows_ok])
+        )
+      }
+    }
+    
+    list(
+      detected = length(matches) > 0,
+      matches  = matches
+    )
+  }
+  
+  res <- lapply(data, check_column)
+  
+  detected <- sapply(res, `[[`, "detected")
+  matches  <- lapply(res, `[[`, "matches")
+  
+  if (return_table) {
+    return(
+      data.frame(
+        variable = names(detected),
+        detected = detected,
+        matches  = I(matches),
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+  
+  matches[detected]
+}
+
+```
+
+

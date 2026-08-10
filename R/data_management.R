@@ -326,6 +326,10 @@ df1 <- df1 %>%
 df1$Surv_without_dbp36sa <- factor(df1$Surv_without_dbp36sa, levels = c("Non","Oui"), labels = c("0","1"))
 
 # --------------------------------------------------------- contrôle de qualité ---------------------------------------------
+vars_qual1 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","prmloc")
+vars_qual2 = c("dec_ou_dbp_36sa","dec_36sa","dbp_36sa","cortico_tard","pneu_tho","hemo_pulm",
+               "hiv_plus_lpmv","cnl_ttt","ca_opr","noso","ecun","perfo_isl","dec_s","chir_lser")
+
 ## Variables qualitatives
 check_equilib_qual1 <- check_dominance_qual(df1, vars = vars_qual1, ncol = 3, png_path = "results/check_equilib_qual1.png")
 check_equilib_qual2 <- check_dominance_qual(df1, vars = vars_qual2, ncol = 3, png_path = "results/check_equilib_qual2.png")
@@ -340,6 +344,10 @@ check_equilib_qual3 <- check_dominance_qual(df1, vars = vars_qual3, ncol = 3, pn
 # → Ces deux variables seront conservées dans l'analyse mais interprétées avec prudence
 #   en raison de leur manque de variabilité (effectifs très faibles dans la modalité "Oui").
 
+
+
+vars_quant1 = c("term_cal","pd_n","crib")
+vars_quant2 = c("somcu_int","somcu_vni","cortico_gene_doz")
 
 ## Variables quantitatives
 check_vars_quant_value1 <- plot_range_check(df1, vars = vars_quant1, ncol = 3, png_path = "results/check_vars_quant_value1.png")

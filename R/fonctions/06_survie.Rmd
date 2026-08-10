@@ -1,0 +1,500 @@
+---
+title: "Survie & Données hospitalières"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX — 06_survie.Rmd
+# =============================================================================
+#
+# CONSTRUCTION DES DONNÉES DE SURVIE
+#   flag_suicide_event         — Indicateur événement suicidaire
+#   get_index_hospitalization  — Premier séjour suicidaire (date index)
+#   get_post_index_stays       — Séjours post-index
+#   get_first_rehospitalisation— Première réhospitalisation après index
+#   build_survival_dataset     — Dataset prêt pour analyse de survie (time/event)
+#
+# ANALYSE DE SURVIE
+#   find_best_cut_gray         — Seuil optimal par test de Gray (risques compétitifs)
+# =============================================================================
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : flag_suicide_event
+# ==============================================================
+# Description :
+# Cette fonction crée un indicateur binaire (0/1) "suicide_event"
+# dans un data.frame selon la présence de certaines valeurs dans
+# une variable de cause de décès ou d'événement.
+#
+# Arguments :
+# - data         : data.frame contenant la variable à analyser
+# - cause_var    : nom de la colonne à vérifier (ex. cause de décès)
+# - cause_values : vecteur de valeurs à rechercher pour identifier l'événement suicidaire
+# - mode         : type de recherche : 
+#                   "contains" -> correspond si la chaîne contient une des valeurs
+#                   "exact"    -> correspond si la chaîne est exactement égale à une des valeurs
+#
+# Retour :
+# - data.frame identique à l'entrée avec une colonne supplémentaire :
+#   suicide_event = 1 si l'événement correspond, 0 sinon
+#
+# Détails du fonctionnement :
+# 1. Vérifie que 'cause_var' existe dans 'data'.
+# 2. Convertit la colonne en caractère.
+# 3. Selon 'mode' :
+#     - contains : utilise grepl() pour détecter la présence de chaque valeur dans chaque ligne.
+#                  La combinaison de toutes les conditions est faite avec Reduce(|, ...).
+#     - exact    : teste l'appartenance à cause_values avec %in%.
+# 4. Convertit le résultat logique en entier (0/1) et l'ajoute comme colonne "suicide_event".
+# ==============================================================
+flag_suicide_event <- function(
+  data,
+  cause_var,
+  cause_values,
+  mode = c("contains", "exact")
+) {
+  
+  mode <- match.arg(mode)
+  
+  if (!cause_var %in% names(data)) {
+    stop("cause_var n'existe pas dans la base.")
+  }
+  
+  cause <- as.character(data[[cause_var]])
+  
+  if (mode == "contains") {
+    suicide_flag <- Reduce(
+      `|`,
+      lapply(cause_values, function(x) grepl(x, cause, ignore.case = TRUE))
+    )
+  } else {
+    suicide_flag <- cause %in% cause_values
+  }
+  
+  data$suicide_event <- as.integer(suicide_flag)
+  return(data)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : get_index_hospitalization
+# ==============================================================
+# Description :
+# Cette fonction extrait, pour chaque patient, le premier séjour
+# lié à un événement suicidaire dans un data.frame d'hospitalisations.
+# Elle peut filtrer par année(s) et ne conserver que certaines variables.
+#
+# Arguments :
+# - data        : data.frame contenant les données d'hospitalisation
+# - patient_var : nom de la colonne identifiant le patient (ex. "id_patient")
+# - date_var    : nom de la colonne avec la date d'hospitalisation (ex. "date_hosp")
+# - year        : vecteur d'années à inclure (optionnel, ex. c(2022, 2023))
+# - keep_vars   : vecteur de noms de colonnes supplémentaires à conserver
+#
+# Retour :
+# - data.frame contenant une ligne par patient avec :
+#   - patient_var
+#   - date_var
+#   - keep_vars (si spécifié)
+#   - index_date : date du premier séjour suicide
+#
+# Détails du fonctionnement :
+# 1. Vérifie et convertit la colonne date_var en objet Date si nécessaire.
+# 2. Filtre les lignes selon les années si 'year' est fourni.
+# 3. Filtre uniquement les séjours avec suicide_event == 1.
+# 4. Sélectionne les variables à conserver : patient_var, date_var, keep_vars.
+# 5. Trie par patient puis par date.
+# 6. Retient uniquement la première hospitalisation par patient (duplicated).
+# 7. Crée la colonne index_date correspondant à cette première hospitalisation.
+# ==============================================================
+get_index_hospitalization <- function(
+  data,
+  patient_var = "id_patient",
+  date_var = "date_hosp",
+  year = NULL,
+  keep_vars = NULL
+) {
+  
+  if (!inherits(data[[date_var]], "Date")) {
+    data[[date_var]] <- as.Date(data[[date_var]])
+  }
+  
+  # Années multiples possibles
+  if (!is.null(year)) {
+    data <- data[format(data[[date_var]], "%Y") %in% as.character(year), ]
+  }
+  
+  # Séjours suicide uniquement
+  data <- data[data$suicide_event == 1, ]
+  
+  # Variables à conserver
+  base_vars <- c(patient_var, date_var, keep_vars)
+  base_vars <- unique(base_vars[base_vars %in% names(data)])
+  
+  data <- data[, base_vars, drop = FALSE]
+  
+  # Index par patient
+  data <- data[order(data[[patient_var]], data[[date_var]]), ]
+  index_data <- data[!duplicated(data[[patient_var]]), ]
+  
+  index_data$index_date <- index_data[[date_var]]
+  
+  return(index_data)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : get_post_index_stays
+# ==============================================================
+# Description :
+# Cette fonction extrait, pour chaque patient, tous les séjours
+# hospitaliers qui suivent la date d'index (premier séjour suicide),
+# en se basant sur un tableau d'index fourni (index_data).
+#
+# Arguments :
+# - data        : data.frame contenant tous les séjours hospitaliers
+# - index_data  : data.frame avec une ligne par patient et la colonne index_date
+# - patient_var : nom de la colonne identifiant le patient (ex. "id_patient")
+# - date_var    : nom de la colonne avec la date d'hospitalisation (ex. "date_hosp")
+# - keep_vars   : vecteur de colonnes supplémentaires à conserver
+#
+# Retour :
+# - data.frame contenant uniquement les séjours **post-index** avec :
+#   - patient_var
+#   - date_var
+#   - suicide_event
+#   - keep_vars (si spécifié)
+#   - index_date (date du premier séjour suicidaire)
+#
+# Détails du fonctionnement :
+# 1. Vérifie et convertit date_var en Date si nécessaire.
+# 2. Sélectionne les colonnes à conserver : patient_var, date_var, suicide_event et keep_vars.
+# 3. Fusionne 'data' avec 'index_data' sur patient_var pour ajouter la colonne index_date.
+# 4. Filtre les lignes où date_var > index_date (séjours après le premier séjour suicidaire).
+# 5. Retourne ce sous-ensemble.
+# ==============================================================
+get_post_index_stays <- function(
+  data,
+  index_data,
+  patient_var = "id_patient",
+  date_var = "date_hosp",
+  keep_vars = NULL
+) {
+  
+  if (!inherits(data[[date_var]], "Date")) {
+    data[[date_var]] <- as.Date(data[[date_var]])
+  }
+  
+  base_vars <- c(patient_var, date_var, "suicide_event", keep_vars)
+  base_vars <- unique(base_vars[base_vars %in% names(data)])
+  
+  merged <- merge(
+    data[, base_vars, drop = FALSE],
+    index_data[, c(patient_var, "index_date")],
+    by = patient_var,
+    all.x = FALSE
+  )
+  
+  post_index <- merged[merged[[date_var]] > merged$index_date, ]
+  
+  return(post_index)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : get_first_rehospitalisation
+# ==============================================================
+# Description :
+# Cette fonction identifie, pour chaque patient, le premier séjour hospitalier 
+# post-index correspondant à un événement suicidaire (suicide_event == 1). 
+# Elle permet donc de récupérer la première réhospitalisation après le séjour index.
+#
+# Arguments :
+# - post_index_data : data.frame contenant les séjours postérieurs à la date d'index,
+#                     avec au moins les colonnes patient_var, date_var et suicide_event
+# - patient_var     : nom de la colonne identifiant le patient (ex. "id_patient")
+# - date_var        : nom de la colonne contenant la date de séjour (ex. "date_hosp")
+# - keep_vars       : vecteur optionnel de colonnes supplémentaires à conserver
+#
+# Retour :
+# - data.frame contenant pour chaque patient :
+#   - patient_var
+#   - date_var (date du premier séjour suicidaire post-index)
+#   - keep_vars éventuelles
+#   - event : indicateur (1) signalant un événement suicidaire
+#   - event_date : date du premier événement
+#
+# Étapes principales :
+# 1. Filtrer les lignes correspondant à suicide_event == 1.
+# 2. Si aucun séjour ne correspond, retourner NULL.
+# 3. Conserver uniquement les colonnes nécessaires (patient_var, date_var, keep_vars).
+# 4. Trier par patient et date croissante.
+# 5. Garder la première ligne pour chaque patient (premier événement).
+# 6. Ajouter les colonnes event = 1 et event_date = date du premier événement.
+#
+# Exemple d'utilisation :
+#   first_rehosp <- get_first_rehospitalisation(
+#                     post_index_data = post_index_stays,
+#                     patient_var = "id_patient",
+#                     date_var = "date_hosp",
+#                     keep_vars = c("service", "diagnosis")
+#                   )
+# ==============================================================
+get_first_rehospitalisation <- function(
+  post_index_data,
+  patient_var = "id_patient",
+  date_var = "date_hosp",
+  keep_vars = NULL
+) {
+  
+  rehosp <- post_index_data[post_index_data$suicide_event == 1, ]
+  
+  if (nrow(rehosp) == 0) return(NULL)
+  
+  base_vars <- c(patient_var, date_var, keep_vars)
+  base_vars <- unique(base_vars[base_vars %in% names(rehosp)])
+  
+  rehosp <- rehosp[, base_vars, drop = FALSE]
+  
+  rehosp <- rehosp[order(rehosp[[patient_var]], rehosp[[date_var]]), ]
+  
+  first_event <- rehosp[!duplicated(rehosp[[patient_var]]), ]
+  
+  first_event$event <- 1
+  first_event$event_date <- first_event[[date_var]]
+  
+  return(first_event)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : build_survival_dataset
+# ==============================================================
+# Description :
+# Cette fonction construit un dataset prêt pour une analyse de survie 
+# à partir de la date d'index des patients et de la date de leur premier 
+# événement (réhospitalisation suicidaire). Elle calcule le temps jusqu'à 
+# l'événement ou jusqu'à la fin du suivi pour les patients sans événement.
+#
+# Arguments :
+# - index_data       : data.frame contenant les informations des séjours index 
+#                      (avec patient_var et index_date)
+# - first_event_data : data.frame contenant le premier événement post-index 
+#                      (avec patient_var et event_date, event = 1)
+# - end_of_followup  : date de fin de suivi pour les patients sans événement
+#                      (chaîne de caractères ou objet Date)
+# - patient_var      : nom de la colonne identifiant le patient (ex. "id_patient")
+#
+# Retour :
+# - data.frame contenant pour chaque patient :
+#   - toutes les colonnes de index_data
+#   - event          : indicateur 1 si un événement est survenu, 0 sinon
+#   - end_date       : date de l'événement ou date de fin de suivi
+#   - time_to_event  : temps en jours entre index_date et end_date
+#
+# Étapes principales :
+# 1. Fusionner index_data et first_event_data par patient_var.
+# 2. Définir l'indicateur event : 1 si l'événement existe, 0 sinon.
+# 3. Déterminer end_date : date de l'événement si existant, sinon end_of_followup.
+# 4. Convertir end_date en Date.
+# 5. Calculer time_to_event = end_date - index_date.
+#
+# Exemple d'utilisation :
+#   surv_df <- build_survival_dataset(
+#                index_data = index_index,
+#                first_event_data = first_rehospitalisation,
+#                end_of_followup = "2025-12-31"
+#             )
+# ==============================================================
+build_survival_dataset <- function(
+  index_data,
+  first_event_data,
+  end_of_followup = "2025-12-31",
+  patient_var = "id_patient"
+) {
+  
+  end_of_followup <- as.Date(end_of_followup)
+  
+  df <- merge(
+    index_data,
+    first_event_data,
+    by = patient_var,
+    all.x = TRUE,
+    suffixes = c("_index", "_event")
+  )
+  
+  df$event <- ifelse(is.na(df$event), 0, 1)
+  
+  df$end_date <- ifelse(
+    df$event == 1,
+    df$event_date,
+    end_of_followup
+  )
+  
+  df$end_date <- as.Date(df$end_date, origin = "1970-01-01")
+  
+  df$time_to_event <- as.numeric(df$end_date - df$index_date)
+  
+  return(df)
+}
+
+```
+
+
+```{r}
+# ==============================================================
+# Fonction : find_best_cut_gray
+# ==============================================================
+# Objectif :
+# Identifier le seuil optimal d’une variable continue en utilisant
+# une approche adaptée aux risques compétitifs, basée sur le test de Gray.
+#
+# Principe :
+# Contrairement aux méthodes classiques (log-rank), cette fonction
+# prend en compte les événements compétitifs (ex : décès) via les
+# fonctions d’incidence cumulée (CIF).
+#
+# Pour chaque valeur possible de la variable :
+#   - on divise la population en deux groupes (High vs Low)
+#   - on compare les courbes CIF entre ces groupes
+#   - on calcule la statistique et la p-value du test de Gray
+#
+# Le seuil optimal est défini comme celui qui minimise la p-value,
+# c’est-à-dire celui qui maximise la différence entre les groupes
+# en tenant compte des risques compétitifs.
+#
+# Arguments :
+# - var   : nom de la variable continue à tester (string)
+# - time  : nom de la variable de temps (string)
+# - event : variable d’événement (codée : 0 = censuré, 1 = événement d’intérêt, 2 = compétitif)
+# - data  : data.frame contenant les données
+#
+# Étapes réalisées :
+# 1. Nettoyage des données :
+#    - suppression des observations avec valeurs manquantes pour la variable étudiée
+#
+# 2. Génération des seuils candidats :
+#    - extraction et tri des valeurs uniques de la variable
+#
+# 3. Boucle sur chaque seuil :
+#    - création de deux groupes (High vs Low)
+#    - estimation des fonctions d’incidence cumulée (CIF)
+#    - application du test de Gray
+#    - stockage de la statistique et de la p-value
+#
+# 4. Sélection du seuil optimal :
+#    - seuil associé à la p-value minimale (différence maximale entre groupes)
+#
+# Sorties :
+# - best_cut    : seuil optimal avec statistique et p-value associées
+# - all_results : tableau de tous les seuils testés avec leurs statistiques
+#
+# Interprétation :
+# - Une p-value faible indique une différence significative entre les groupes
+# - Le seuil retenu correspond à la meilleure séparation des risques
+#   en tenant compte des événements compétitifs
+#
+# Intérêt :
+# - Méthode cohérente pour les données de survie avec risques compétitifs
+# - Plus adaptée que les approches basées sur le log-rank dans ce contexte
+#
+# Limites :
+# - Multiplicité des tests → risque d’optimisme (overfitting)
+# - Nécessite idéalement une validation (bootstrap ou cohorte externe)
+# - Sensible aux petits effectifs ou aux événements rares
+#
+# Exemple d'utilisation :
+#   res <- find_best_cut_gray(
+#            var = "dth_radio_p_dmean",
+#            time = "time_pr_mois1",
+#            event = "event1",
+#            data = df1_surv2
+#          )
+#
+#   res$best_cut
+# ==============================================================
+
+find_best_cut_gray <- function(var, time, event, data){
+
+  # Supprimer les NA
+  df <- data[!is.na(data[[var]]), ]
+
+  # Trier les valeurs uniques candidates
+  cuts <- sort(unique(df[[var]]))
+
+  results <- data.frame(cut = numeric(), stat = numeric(), p.value = numeric())
+
+  for(c in cuts){
+
+    # Création des groupes
+    group <- ifelse(df[[var]] > c, "High", "Low")
+
+    # Calcul CIF + test de Gray
+    ci <- cuminc(
+      ftime = df[[time]],
+      fstatus = df[[event]],
+      group = group
+    )
+
+    # Extraire statistique et p-value
+    stat <- ci$Tests[1, "stat"]
+    pval <- ci$Tests[1, "pv"]
+
+    results <- rbind(results, data.frame(cut = c, stat = stat, p.value = pval))
+  }
+
+  # Meilleur seuil = p-value minimale
+  best <- results[which.min(results$p.value), ]
+
+  return(list(best_cut = best, all_results = results))
+}
+```
+
+

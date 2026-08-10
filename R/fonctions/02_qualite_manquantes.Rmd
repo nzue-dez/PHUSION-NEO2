@@ -1,0 +1,1458 @@
+---
+title: "Qualité des données & Données manquantes"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX — 02_qualite_manquantes.Rmd
+# =============================================================================
+#
+# EXPORT & TABLEAUX DE DONNÉES MANQUANTES
+#   export_missing_data_table  — Tableau des données manquantes → Word
+#   missing_plot               — Heatmap des données manquantes
+#
+# CONTRÔLE QUALITÉ DES VARIABLES
+#   plot_range_check           — Strip plot plage 95% + obs. hors plage en rouge
+#   check_dominance_qual       — Détection modalité dominante (> seuil%)
+#
+# ANALYSE DES PATTERNS DE MANQUANCE
+#   plot_missing_patterns      — Heatmap obs×vars + patterns + % par variable
+#   plot_missing_mar_explore   — Boxplots / barres obs vs manquant (MAR/MNAR)
+# =============================================================================
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+```{r}
+###############################################################################
+# Fonction : export_missing_data_table
+###############################################################################
+#
+# Description :
+# Cette fonction permet :
+#   - de calculer le nombre de données manquantes par variable,
+#   - de calculer le pourcentage de données manquantes,
+#   - de renommer les variables si souhaité,
+#   - de générer un tableau formaté,
+#   - d’exporter automatiquement le résultat dans un document Word.
+#
+# ---------------------------------------------------------------------------
+# Arguments :
+# ---------------------------------------------------------------------------
+#
+# data :
+#   Jeu de données à analyser.
+#
+#
+# variable_labels :
+#   Liste nommée optionnelle permettant de renommer les variables.
+#
+#   Exemple :
+#   variable_labels = c(
+#     age = "Âge",
+#     sexe = "Sexe"
+#   )
+#
+#
+# file_name :
+#   Nom du fichier Word exporté.
+#
+#
+# title :
+#   Titre affiché dans le document Word.
+#
+#
+# digits :
+#   Nombre de décimales pour le pourcentage de données manquantes.
+#
+#
+# ---------------------------------------------------------------------------
+# Packages nécessaires :
+# ---------------------------------------------------------------------------
+#
+#   - dplyr
+#   - flextable
+#   - officer
+#
+###############################################################################
+
+library(dplyr)
+library(flextable)
+library(officer)
+
+export_missing_data_table <- function(
+    data,
+    variable_labels = NULL,
+    file_name = "table_donnees_manquantes.docx",
+    title = "Complétude des données",
+    digits = 1
+){
+
+  # Nombre total d'observations
+  n <- nrow(data)
+
+  # Tableau des données manquantes
+  tab <- data.frame(
+    Variable = colnames(data),
+    Donnees_manquantes = colSums(is.na(data)),
+    Pourcentage_manquant = round(
+      100 * colSums(is.na(data)) / n,
+      digits
+    ),
+    check.names = FALSE
+  )
+
+  # Ajout du symbole %
+  tab$Pourcentage_manquant <- paste0(
+    tab$Pourcentage_manquant,
+    " %"
+  )
+
+  # Renommage optionnel des variables
+  if(!is.null(variable_labels)){
+
+    tab$Variable <- ifelse(
+      tab$Variable %in% names(variable_labels),
+      variable_labels[tab$Variable],
+      tab$Variable
+    )
+
+  }
+
+  # Création du tableau formaté
+  ft <- flextable(tab)
+
+  ft <- autofit(ft)
+
+  # Création du document Word
+  doc <- read_docx()
+
+  doc <- body_add_par(
+    doc,
+    title,
+    style = "heading 1"
+  )
+
+  doc <- body_add_flextable(doc, ft)
+
+  doc <- body_add_par(
+    doc,
+    "Le tableau présente le nombre et le pourcentage de données manquantes par variable.",
+    style = "Normal"
+  )
+
+  # Export Word
+  print(doc, target = file_name)
+
+  # Retour du tableau dans R
+  return(tab)
+
+}
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (12)
+# ------------------------------------------------------------------
+# Fonction : missing_plot
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction génère un résumé visuel et tabulaire des valeurs
+# manquantes pour un ensemble de variables d’un data.frame. Elle peut
+# produire des graphiques globaux ou par groupe, et exporter les
+# résultats sous forme de fichier Excel et/ou image.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - vars : vecteur des variables à analyser (par défaut toutes les variables)
+# - group_var : variable de regroupement (optionnel)
+# - labels_list : liste nommée pour renommer les variables ou le groupe
+# - threshold : seuil (%) pour mettre en évidence les valeurs manquantes
+# - col_below : couleur des barres sous le seuil (global)
+# - col_above : couleur des barres au-dessus du seuil (global)
+# - ylim_max : limite maximale de l’axe y pour le graphique
+# - save_path : chemin pour sauvegarder le graphique (PNG ou PDF)
+# - excel_path : chemin pour exporter le tableau des valeurs manquantes
+#
+# Fonctionnement :
+# - Vérifie l’existence des variables et de la variable de groupe
+# - Si aucun groupe :
+#     → calcule le nombre et le pourcentage de NA pour chaque variable
+#     → génère un graphique en barres avec couleurs selon le seuil
+# - Si un groupe est fourni :
+#     → calcule le nombre et le pourcentage de NA par variable et par groupe
+#     → génère un graphique en barres groupées
+# - Les labels personnalisés sont appliqués si fournis
+# - Les valeurs NA sont comptabilisées et affichées dans le graphique
+# - Exporte le tableau vers Excel si excel_path est fourni
+# - Sauvegarde le graphique si save_path est fourni
+#
+# Sortie :
+# - Liste contenant :
+#     * summary_table : tableau des valeurs manquantes avec effectifs et pourcentages
+#     * plot          : objet ggplot du graphique
+#
+# Dépendances :
+# - dplyr, tidyr, ggplot2, openxlsx
+#
+# Remarques :
+# - Utile pour le diagnostic des données avant analyses
+# - Les graphiques sont adaptés pour des rapports ou dashboards
+# - La rotation des axes facilite la lecture des noms de variables
+# ------------------------------------------------------------------
+missing_plot <- function(
+  df,
+  vars = NULL,
+  group_var = NULL,
+  labels_list = NULL,
+  threshold = 20,
+  col_below = "steelblue",
+  col_above = "red",
+  ylim_max = NULL,
+  save_path = NULL,
+  excel_path = NULL
+) {
+
+  # ============================================================
+  # Vérifications
+  # ============================================================
+  if (!is.null(group_var) && !group_var %in% names(df)) {
+    stop("La variable de groupe n'existe pas dans le data.frame.")
+  }
+
+  if (is.null(vars)) vars <- names(df)
+  vars <- vars[vars %in% names(df)]
+
+  if (!is.null(labels_list) && !is.list(labels_list)) {
+    stop("labels_list doit être une liste nommée.")
+  }
+
+  # Label du group_var
+  group_label <- if (!is.null(labels_list) && !is.null(group_var) &&
+                     group_var %in% names(labels_list)) {
+    labels_list[[group_var]]
+  } else {
+    group_var
+  }
+
+  # ============================================================
+  # CAS SANS GROUPE
+  # ============================================================
+  if (is.null(group_var)) {
+
+    summary_df <- df %>%
+      summarise(across(all_of(vars), ~ sum(is.na(.)))) %>%
+      pivot_longer(
+        cols = everything(),
+        names_to = "variable",
+        values_to = "n_missing"
+      ) %>%
+      mutate(
+        total = nrow(df),
+        pct_missing = 100 * n_missing / total,
+        label = if (!is.null(labels_list)) {
+          if_else(variable %in% names(labels_list),
+                  unlist(labels_list[variable]),
+                  variable)
+        } else {
+          variable
+        },
+        above_threshold = pct_missing > threshold
+      )
+
+    cat("Résumé des valeurs manquantes (global):\n")
+    print(summary_df)
+
+    p <- ggplot(
+      summary_df,
+      aes(x = reorder(label, -pct_missing),
+          y = pct_missing,
+          fill = above_threshold)
+    ) +
+      geom_col() +
+      geom_text(
+        aes(label = paste0(n_missing, " (", round(pct_missing, 1), "%)")),
+        vjust = -0.5
+      ) +
+      scale_fill_manual(
+        values = c(`FALSE` = col_below, `TRUE` = col_above)
+      ) +
+      labs(
+        title = "",
+        x = "Variable",
+        y = "% Missing",
+        fill = paste0(">% ", threshold)
+      ) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    if (!is.null(ylim_max)) {
+      p <- p + ylim(0, ylim_max)
+    }
+
+  } else {
+
+    # ============================================================
+    # CAS AVEC GROUPE
+    # ============================================================
+    summary_df <- df %>%
+      select(all_of(c(group_var, vars))) %>%
+      pivot_longer(
+        cols = all_of(vars),
+        names_to = "variable",
+        values_to = "value"
+      ) %>%
+      mutate(is_na = is.na(value)) %>%
+      group_by(across(all_of(group_var)), variable) %>%
+      summarise(
+        n_missing = sum(is_na),
+        total = n(),
+        pct_missing = 100 * n_missing / total,
+        .groups = "drop"
+      ) %>%
+      mutate(
+        label = if (!is.null(labels_list)) {
+          if_else(variable %in% names(labels_list),
+                  unlist(labels_list[variable]),
+                  variable)
+        } else {
+          variable
+        },
+        above_threshold = pct_missing > threshold
+      )
+
+    cat("Résumé des valeurs manquantes par groupe:\n")
+    print(summary_df)
+
+    p <- ggplot(
+      summary_df,
+      aes(
+        x = reorder(label, -pct_missing),
+        y = pct_missing,
+        fill = .data[[group_var]]
+      )
+    ) +
+      geom_col(position = position_dodge(width = 0.9)) +
+      geom_text(
+        aes(label = paste0(n_missing, " (", round(pct_missing, 1), "%)")),
+        position = position_dodge(width = 0.9),
+        vjust = -0.5,
+        size = 3
+      ) +
+      scale_fill_brewer(palette = "Set2") +
+      labs(
+        title = "",
+        x = "Variable",
+        y = "% Missing",
+        fill = group_label
+      ) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    if (!is.null(ylim_max)) {
+      p <- p + ylim(0, ylim_max)
+    }
+  }
+
+  # ============================================================
+  # EXPORTS
+  # ============================================================
+  if (!is.null(excel_path)) {
+    wb <- createWorkbook()
+    addWorksheet(wb, "Missing Summary")
+    writeData(wb, "Missing Summary", summary_df)
+    saveWorkbook(wb, excel_path, overwrite = TRUE)
+    cat("Excel exporté :", excel_path, "\n")
+  }
+
+  if (!is.null(save_path)) {
+    ggsave(save_path, p, width = 12, height = 6, dpi = 300)
+    cat("Graphique sauvegardé :", save_path, "\n")
+  }
+
+  return(list(summary_table = summary_df, plot = p))
+}
+
+```
+
+
+```{r}
+# ==============================================================================
+# Fonction : plot_range_check
+# ==============================================================================
+#
+# Description :
+# Pour chaque variable quantitative, affiche un boxplot (médiane, Q1, Q3,
+# moustaches de Tukey) avec tous les points individuels superposés.
+# Les observations strictement au-delà des moustaches (outliers IQR de Tukey)
+# sont colorées en rouge ; les autres en gris foncé.
+# Les bornes peuvent aussi être fournies manuellement par variable.
+#
+# L'utilisateur peut :
+#   - Laisser les bornes calculées automatiquement (IQR de Tukey : Q1−1.5×IQR ; Q3+1.5×IQR)
+#   - Fournir des bornes manuelles par variable via limits_list
+#   - Ajuster le coefficient IQR (1.5 = standard, 3 = extrêmes seulement)
+#   - Choisir une variable d'étiquette pour identifier les outliers dans le tableau
+#
+# Arguments :
+# - df          : data.frame contenant les données
+# - vars        : vecteur de noms de variables quantitatives à vérifier
+# - labels_list : liste nommée variable → label lisible (optionnel)
+# - limits_list : liste nommée variable → c(borne_inf, borne_sup) manuelles
+#                 Prioritaire sur coef_IQR si fourni pour la variable.
+# - coef_IQR    : coefficient multiplicateur de l'IQR (défaut 1.5 = standard Tukey)
+#                 Utiliser 3 pour ne détecter que les valeurs extrêmes.
+# - color_in    : couleur des points dans la plage (défaut "grey40")
+# - color_out   : couleur des points hors plage (défaut "red")
+# - alpha       : transparence des points (défaut 0.6)
+# - point_size  : taille des points (défaut 2)
+# - ncol        : nombre de colonnes dans la grille de graphiques (défaut 2)
+# - nrow        : nombre de lignes (calculé automatiquement si NULL)
+# - png_path    : chemin de sauvegarde PNG (optionnel)
+# - width, height, dpi : dimensions de l'image exportée
+# - label_var   : nom de la variable à utiliser comme identifiant des outliers
+#                 dans le tableau retourné (ex : "ID"). Si NULL (défaut), numéro de ligne.
+#
+# Valeur retournée :
+# - Liste contenant :
+#     $plot           : objet patchwork combinant tous les graphiques
+#     $outliers_table : data.frame des observations hors plage avec colonnes :
+#                         variable, observation, valeur, borne_depassee,
+#                         ecart_brut, ecart_en_SD, categorie
+#                         (Légèrement / Modérément / Fortement / Très écarté)
+#     $limits         : data.frame des bornes utilisées pour chaque variable
+#
+# Dépendances :
+# - ggplot2, patchwork, dplyr
+#
+# Remarques :
+# - Seuls les points STRICTEMENT en dehors des moustaches sont colorés en rouge
+# - L'écartement est mesuré en écarts-types depuis la borne dépassée :
+#     < 0.5 SD → Légèrement écarté
+#     0.5–1 SD → Modérément écarté
+#     1–2 SD   → Fortement écarté
+#     > 2 SD   → Très écarté
+# - Les identifiants des outliers sont dans $outliers_table, pas sur le graphique
+# ==============================================================================
+plot_range_check <- function(
+  df,
+  vars,
+  labels_list  = NULL,
+  limits_list  = NULL,
+  coef_IQR     = 1.5,   # 1.5 = standard Tukey ; 3 = extrêmes seulement
+  color_in     = "grey40",
+  color_out    = "red",
+  alpha        = 0.6,
+  point_size   = 2,
+  ncol         = 2,
+  nrow         = NULL,
+  png_path     = NULL,
+  width        = 12,
+  height       = 8,
+  dpi          = 300,
+  label_var    = NULL   # variable d'étiquette des outliers dans le tableau ; NULL = numéro de ligne
+) {
+
+  # Vérifications
+  vars <- vars[vars %in% names(df)]
+  if (length(vars) == 0) stop("Aucune variable de vars n'existe dans df.")
+
+  plot_list    <- list()
+  outlier_list <- list()
+  limits_rows  <- list()
+
+  for (v in vars) {
+
+    x <- df[[v]]
+
+    # --- Bornes (IQR de Tukey par défaut, manuelles si fournies) ---
+    if (!is.null(limits_list) && v %in% names(limits_list)) {
+      lo <- limits_list[[v]][1]
+      hi <- limits_list[[v]][2]
+      source_borne <- "manuel"
+    } else {
+      q1  <- as.numeric(quantile(x, 0.25, na.rm = TRUE))
+      q3  <- as.numeric(quantile(x, 0.75, na.rm = TRUE))
+      iqr <- q3 - q1
+      lo  <- q1 - coef_IQR * iqr
+      hi  <- q3 + coef_IQR * iqr
+      source_borne <- paste0("IQR Tukey (Q1−", coef_IQR, "×IQR ; Q3+", coef_IQR, "×IQR)")
+    }
+
+    # --- Indicateur hors plage (strictement en dehors) ---
+    out_flag <- !is.na(x) & (x < lo | x > hi)
+
+    # --- Label du graphique ---
+    lab <- if (!is.null(labels_list) && v %in% names(labels_list)) labels_list[[v]] else v
+
+    # --- Étiquette par observation ---
+    etiquette <- if (!is.null(label_var) && label_var %in% names(df)) {
+      as.character(df[[label_var]])
+    } else {
+      as.character(seq_len(nrow(df)))
+    }
+
+    # --- Data pour ggplot ---
+    df_plot <- data.frame(
+      obs        = seq_len(nrow(df)),
+      value      = x,
+      hors_plage = out_flag,
+      etiquette  = etiquette,
+      stringsAsFactors = FALSE
+    )
+    df_plot <- df_plot[!is.na(df_plot$value), ]
+
+    n_out   <- sum(df_plot$hors_plage)
+    pct_out <- round(100 * n_out / nrow(df_plot), 1)
+
+    subtitle_txt <- paste0(
+      source_borne, " : [", round(lo, 2), " ; ", round(hi, 2), "]",
+      "  —  ", n_out, " outlier(s) (", pct_out, "%)"
+    )
+
+    # --- Boxplot + points colorés superposés ---
+    pos <- position_jitter(width = 0.15, seed = 42)
+
+    p <- ggplot(df_plot, aes(x = factor(1), y = value)) +
+      geom_boxplot(
+        outlier.shape = NA,          # on gère nous-mêmes la couleur des outliers
+        fill          = "steelblue",
+        alpha         = 0.08,
+        color         = "navy",
+        width         = 0.5,
+        coef          = coef_IQR     # moustaches alignées sur le même coef
+      ) +
+      geom_point(
+        aes(color = hors_plage),
+        position = pos,
+        size     = point_size,
+        alpha    = alpha
+      ) +
+      scale_color_manual(
+        values = c("FALSE" = color_in, "TRUE" = color_out),
+        labels = c("FALSE" = "Dans la plage", "TRUE" = "Hors plage"),
+        name   = NULL
+      ) +
+      scale_x_discrete(labels = NULL, breaks = NULL) +
+      labs(title = lab, subtitle = subtitle_txt, x = NULL, y = "Valeur") +
+      theme_minimal(base_size = 11) +
+      theme(
+        plot.title      = element_text(face = "bold", size = 12),
+        plot.subtitle   = element_text(size = 9, color = "grey40"),
+        legend.position = "bottom"
+      )
+
+    plot_list[[v]] <- p
+
+    # --- Tableau des outliers avec catégorie d'écartement ---
+    df_out <- df_plot[df_plot$hors_plage, ]
+    if (nrow(df_out) > 0) {
+      sd_x <- sd(df_plot$value, na.rm = TRUE)
+      df_out$borne_depassee <- ifelse(df_out$value > hi, "supérieure", "inférieure")
+      df_out$ecart_brut     <- ifelse(df_out$value > hi,
+                                      df_out$value - hi,
+                                      lo - df_out$value)
+      df_out$ecart_en_SD    <- round(df_out$ecart_brut / sd_x, 2)
+      df_out$categorie      <- cut(
+        df_out$ecart_en_SD,
+        breaks = c(0, 0.5, 1, 2, Inf),
+        labels = c("Légèrement écarté", "Modérément écarté", "Fortement écarté", "Très écarté"),
+        right  = FALSE
+      )
+      outlier_rows <- data.frame(
+        variable       = v,
+        observation    = df_out$etiquette,
+        valeur         = round(df_out$value, 3),
+        borne_depassee = df_out$borne_depassee,
+        ecart_brut     = round(df_out$ecart_brut, 3),
+        ecart_en_SD    = df_out$ecart_en_SD,
+        categorie      = as.character(df_out$categorie),
+        stringsAsFactors = FALSE
+      )
+      outlier_list[[v]] <- outlier_rows
+    }
+
+    # --- Tableau des limites ---
+    limits_rows[[v]] <- data.frame(
+      variable       = v,
+      label          = lab,
+      borne_inf      = round(lo, 3),
+      borne_sup      = round(hi, 3),
+      source         = source_borne,
+      n_hors_plage   = n_out,
+      pct_hors_plage = pct_out,
+      stringsAsFactors = FALSE
+    )
+
+    # Message console
+    if (n_out > 0) {
+      cat(sprintf("[%s] %d obs. hors plage [%.2f ; %.2f] (%s%%)\n",
+                  v, n_out, lo, hi, pct_out))
+    }
+  }
+
+  # --- Grille de graphiques ---
+  if (is.null(nrow)) nrow <- ceiling(length(plot_list) / ncol)
+  combined <- patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow)
+
+  if (!is.null(png_path)) {
+    ggplot2::ggsave(png_path, combined, width = width, height = height, dpi = dpi)
+    message("Graphique sauvegardé : ", png_path)
+  }
+
+  print(combined)
+
+  outliers_df <- if (length(outlier_list) > 0) dplyr::bind_rows(outlier_list) else data.frame()
+  limits_df   <- dplyr::bind_rows(limits_rows)
+
+  return(invisible(list(
+    plot           = combined,
+    outliers_table = outliers_df,   # tableau détaillé avec catégorie d'écartement
+    limits         = limits_df
+  )))
+}
+```
+
+
+```{r}
+# ==============================================================================
+# Fonction : check_dominance_qual
+# ==============================================================================
+#
+# Description :
+# Pour chaque variable qualitative, calcule la fréquence de chaque modalité
+# et détecte les situations de dominance : quand une modalité représente une
+# proportion anormalement élevée des observations (ex. > 95%).
+#
+# Une variable dominante est problématique pour la modélisation :
+#   - En régression : coefficient instable, convergence difficile
+#   - En ML : la classe rare peut être absente de certains folds
+#   - En général : peu d'information différentielle apportée
+#
+# La fonction retourne :
+#   - Un tableau de synthèse par variable et modalité
+#   - Une recommandation automatique
+#   - Un graphique en barres pour visualiser la distribution
+#
+# Arguments :
+# - df          : data.frame contenant les données
+# - vars        : vecteur de noms de variables qualitatives à analyser
+# - labels_list : liste nommée variable → label lisible (optionnel)
+# - threshold   : seuil de dominance en proportion (défaut 0.95 = 95%)
+# - color_ok    : couleur des barres sous le seuil (défaut "steelblue")
+# - color_alert : couleur des barres qui dépassent le seuil (défaut "red")
+# - show_plot   : TRUE pour afficher les graphiques (défaut TRUE)
+# - ncol        : colonnes dans la grille de graphiques
+# - png_path    : chemin de sauvegarde PNG (optionnel)
+# - width, height, dpi : dimensions exportation
+#
+# Valeur retournée :
+# - Liste contenant :
+#     $summary : data.frame avec variable, modalité, n, %, flag dominance,
+#                recommandation
+#     $flagged : vecteur des variables présentant une dominance
+#     $plot    : objet patchwork (NULL si show_plot = FALSE)
+#
+# Dépendances :
+# - ggplot2, patchwork, dplyr
+#
+# Remarques :
+# - Les NA sont exclus de l'analyse (seules les modalités réelles sont comparées)
+# - Utile avant tout modèle de régression, ML ou analyse de survie
+# - Complémentaire de table_to_word : ici focus sur la qualité des variables
+# ==============================================================================
+check_dominance_qual <- function(
+  df,
+  vars,
+  labels_list = NULL,
+  threshold   = 0.95,
+  color_ok    = "steelblue",
+  color_alert = "red",
+  show_plot   = TRUE,
+  ncol        = 2,
+  png_path    = NULL,
+  width       = 12,
+  height      = 8,
+  dpi         = 300
+) {
+
+  vars <- vars[vars %in% names(df)]
+  if (length(vars) == 0) stop("Aucune variable de vars n'existe dans df.")
+
+  summary_rows <- list()
+  flagged_vars <- character(0)
+  plot_list    <- list()
+
+  for (v in vars) {
+
+    x <- df[[v]]
+    x_valid  <- x[!is.na(x)]          # NA exclus de l'analyse
+    n_total  <- length(x_valid)        # dénominateur = observations valides uniquement
+
+    # --- Table des fréquences (NA exclus) ---
+    tab <- table(x_valid)
+    tab_df <- data.frame(
+      modalite = names(tab),
+      n        = as.integer(tab),
+      stringsAsFactors = FALSE
+    )
+    tab_df$pct <- round(100 * tab_df$n / n_total, 2)
+    tab_df$dominante <- tab_df$pct / 100 >= threshold
+
+    # --- Variable dominante ? ---
+    is_flagged <- any(tab_df$dominante)
+    if (is_flagged) flagged_vars <- c(flagged_vars, v)
+
+    # --- Label ---
+    lab <- if (!is.null(labels_list) && v %in% names(labels_list)) labels_list[[v]] else v
+
+    # --- Recommandation ---
+    if (is_flagged) {
+      dom_mod <- tab_df$modalite[tab_df$dominante]
+      dom_pct <- tab_df$pct[tab_df$dominante]
+      reco <- paste0(
+        "⚠ EXCLURE du modèle — modalité '", dom_mod,
+        "' représente ", dom_pct, "% des obs. (seuil : ",
+        round(threshold * 100), "%)"
+      )
+    } else {
+      reco <- paste0("✔ OK — aucune modalité ne dépasse ", round(threshold * 100), "%")
+    }
+
+    # --- Tableau synthèse ---
+    tab_df$variable       <- v
+    tab_df$label          <- lab
+    tab_df$n_total        <- n_total
+    tab_df$recommandation <- reco
+
+    summary_rows[[v]] <- tab_df[, c("variable", "label", "modalite", "n",
+                                    "pct", "dominante", "n_total", "recommandation")]
+
+    # Message console
+    if (is_flagged) {
+      cat(sprintf("[%s] DOMINANCE DÉTECTÉE : '%s' = %.1f%%\n",
+                  v, dom_mod, dom_pct))
+    }
+
+    # --- Graphique ---
+    if (show_plot) {
+
+      n_mod <- nrow(tab_df)
+      subtitle_txt <- if (is_flagged) {
+        paste0("⚠ Dominance détectée (seuil ", round(threshold * 100), "%)")
+      } else {
+        paste0("✔ Distribution équilibrée (seuil ", round(threshold * 100), "%)")
+      }
+
+      p <- ggplot(tab_df, aes(x = reorder(modalite, -pct),
+                               y = pct,
+                               fill = dominante)) +
+        geom_col(width = 0.6) +
+        geom_text(aes(label = paste0(n, "\n(", pct, "%)")),
+                  vjust = -0.3, size = 3.2) +
+        geom_hline(yintercept = threshold * 100,
+                   linetype = "dashed", color = "darkred", linewidth = 0.8) +
+        annotate("text",
+                 x = n_mod + 0.4,
+                 y = threshold * 100 + 1.5,
+                 label = paste0("Seuil ", round(threshold * 100), "%"),
+                 color = "darkred", size = 3, hjust = 1) +
+        scale_fill_manual(values = c("FALSE" = color_ok, "TRUE" = color_alert),
+                          guide  = "none") +
+        scale_y_continuous(limits = c(0, 115), labels = function(x) paste0(x, "%")) +
+        labs(
+          title    = lab,
+          subtitle = subtitle_txt,
+          x = "Modalité",
+          y = "Fréquence (%)"
+        ) +
+        theme_minimal(base_size = 11) +
+        theme(
+          plot.title    = element_text(face = "bold", size = 12),
+          plot.subtitle = element_text(
+            size  = 9,
+            color = if (is_flagged) "red" else "grey40"
+          ),
+          axis.text.x = element_text(angle = 30, hjust = 1)
+        )
+
+      plot_list[[v]] <- p
+    }
+  }
+
+  # --- Tableau final ---
+  summary_df <- dplyr::bind_rows(summary_rows)
+
+  # --- Grille graphique ---
+  combined_plot <- NULL
+  if (show_plot && length(plot_list) > 0) {
+    nrow_grid <- ceiling(length(plot_list) / ncol)
+    combined_plot <- patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow_grid)
+
+    if (!is.null(png_path)) {
+      ggplot2::ggsave(png_path, combined_plot, width = width, height = height, dpi = dpi)
+      message("Graphique sauvegardé : ", png_path)
+    }
+
+    print(combined_plot)
+  }
+
+  # --- Résumé final console ---
+  cat("\n=== RÉSUMÉ DOMINANCE ===\n")
+  if (length(flagged_vars) > 0) {
+    cat("Variables à exclure / surveiller :\n")
+    for (fv in flagged_vars) cat(" -", fv, "\n")
+  } else {
+    cat("Aucune variable dominante détectée.\n")
+  }
+  cat("========================\n\n")
+
+  return(invisible(list(
+    summary = summary_df,
+    flagged = flagged_vars,
+    plot    = combined_plot
+  )))
+}
+```
+
+
+```{r}
+# ==============================================================================
+# Fonction : plot_missing_patterns
+# ==============================================================================
+#
+# Description :
+# Produit une visualisation en trois panneaux des données manquantes :
+#
+#   Panneau 1 — Heatmap obs × variables
+#     Chaque ligne = une observation, chaque colonne = une variable.
+#     Rouge = manquant, gris = observé.
+#     Les lignes sont triées pour regrouper les patterns identiques.
+#
+#   Panneau 2 — Fréquence des patterns de manquance
+#     Chaque pattern unique de manquance (combinaison de variables manquantes)
+#     est représenté par une barre. Permet de voir si la manquance est
+#     concentrée sur quelques patterns ou dispersée.
+#
+#   Panneau 3 — Proportion de manquance par variable
+#     Barres horizontales, colorées selon un seuil d'alerte.
+#
+# Arguments :
+# - df           : data.frame à analyser
+# - vars         : vecteur de variables à inclure (NULL = toutes)
+# - labels_list  : liste nommée variable → label lisible
+# - color_miss   : couleur des cellules manquantes (défaut rouge)
+# - color_obs    : couleur des cellules observées (défaut gris clair)
+# - threshold    : seuil (%) pour colorer les barres du panneau 3 en rouge
+# - sort_rows    : TRUE pour trier les lignes par pattern
+# - png_path     : chemin de sauvegarde (optionnel)
+# - width, height, dpi : dimensions export
+#
+# Valeur retournée :
+# - Liste contenant :
+#     $pattern_table : data.frame des patterns uniques + fréquence + %
+#     $miss_per_var  : data.frame % manquant par variable
+#     $indicator     : matrice binaire (1 = manquant)
+#
+# Dépendances : ggplot2, dplyr, tidyr, patchwork
+# ==============================================================================
+plot_missing_patterns <- function(
+  df,
+  vars        = NULL,
+  labels_list = NULL,
+  color_miss  = "#C0392B",
+  color_obs   = "#BDC3C7",
+  threshold   = 20,
+  sort_rows   = TRUE,
+  png_path    = NULL,
+  width       = 16,
+  height      = 10,
+  dpi         = 300
+) {
+
+  if (is.null(vars)) vars <- names(df)
+  vars <- vars[vars %in% names(df)]
+  df_sub <- df[, vars, drop = FALSE]
+  n  <- nrow(df_sub)
+  nv <- length(vars)
+
+  # Labels
+  labs <- sapply(vars, function(v) {
+    if (!is.null(labels_list) && v %in% names(labels_list)) labels_list[[v]] else v
+  })
+
+  # ── Matrice indicatrice (1 = manquant) ──────────────────────────────────────
+  ind <- as.data.frame(sapply(df_sub, is.na) * 1L)
+  colnames(ind) <- vars
+
+  # ── Tri des lignes par pattern ───────────────────────────────────────────────
+  if (sort_rows) {
+    pattern_key <- apply(ind, 1, paste, collapse = "")
+    ord <- order(pattern_key)
+    ind_sorted <- ind[ord, , drop = FALSE]
+  } else {
+    ind_sorted <- ind
+  }
+  ind_sorted$obs_id <- seq_len(n)
+
+  # ── PANNEAU 1 : Heatmap ─────────────────────────────────────────────────────
+  df_long <- tidyr::pivot_longer(
+    ind_sorted,
+    cols      = all_of(vars),
+    names_to  = "variable",
+    values_to = "manquant"
+  )
+  df_long$variable <- factor(df_long$variable, levels = vars, labels = labs)
+  df_long$manquant <- factor(df_long$manquant, levels = c(0, 1),
+                              labels = c("Observé", "Manquant"))
+
+  p1 <- ggplot(df_long, aes(x = variable, y = obs_id, fill = manquant)) +
+    geom_tile(color = NA) +
+    scale_fill_manual(values = c("Observé" = color_obs, "Manquant" = color_miss),
+                      name = NULL) +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(title = "Carte des données manquantes",
+         subtitle = paste0(n, " observations × ", nv, " variables"),
+         x = NULL, y = "Observations") +
+    theme_minimal(base_size = 10) +
+    theme(
+      axis.text.x     = element_text(angle = 40, hjust = 1, size = 9),
+      axis.text.y     = element_blank(),
+      axis.ticks.y    = element_blank(),
+      panel.grid      = element_blank(),
+      legend.position = "top",
+      plot.title      = element_text(face = "bold")
+    )
+
+  # ── PANNEAU 2 : Fréquence des patterns ──────────────────────────────────────
+  ind$pattern <- apply(ind[, vars, drop = FALSE], 1, function(r) {
+    if (all(r == 0)) "Complet" else paste(vars[r == 1], collapse = " + ")
+  })
+
+  pattern_tab <- as.data.frame(table(ind$pattern), stringsAsFactors = FALSE)
+  colnames(pattern_tab) <- c("pattern", "n")
+  pattern_tab$pct <- round(100 * pattern_tab$n / n, 1)
+  pattern_tab <- pattern_tab[order(-pattern_tab$n), ]
+  pattern_tab$pattern <- factor(pattern_tab$pattern,
+                                 levels = rev(pattern_tab$pattern))
+
+  p2 <- ggplot(pattern_tab, aes(x = pattern, y = pct,
+                                  fill = pattern == "Complet")) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = paste0(n, "\n(", pct, "%)")),
+              hjust = -0.1, size = 3) +
+    scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = color_miss),
+                      guide  = "none") +
+    coord_flip(clip = "off") +
+    scale_y_continuous(limits = c(0, max(pattern_tab$pct) * 1.35),
+                       labels = function(x) paste0(x, "%")) +
+    labs(title = "Fréquence des patterns de manquance",
+         x = "Pattern", y = "% observations") +
+    theme_minimal(base_size = 10) +
+    theme(plot.title = element_text(face = "bold"),
+          axis.text.y = element_text(size = 8))
+
+  # ── PANNEAU 3 : % manquant par variable ─────────────────────────────────────
+  miss_var <- data.frame(
+    variable = vars,
+    label    = labs,
+    n_miss   = colSums(is.na(df_sub)),
+    pct_miss = round(100 * colSums(is.na(df_sub)) / n, 1),
+    stringsAsFactors = FALSE
+  )
+  miss_var$label   <- factor(miss_var$label, levels = rev(labs))
+  miss_var$alerte  <- miss_var$pct_miss >= threshold
+
+  p3 <- ggplot(miss_var, aes(x = label, y = pct_miss, fill = alerte)) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = paste0(n_miss, "\n(", pct_miss, "%)")),
+              hjust = -0.1, size = 3) +
+    scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = color_miss),
+                      guide  = "none") +
+    geom_hline(yintercept = threshold, linetype = "dashed",
+               color = "darkred", linewidth = 0.7) +
+    coord_flip(clip = "off") +
+    scale_y_continuous(limits = c(0, max(miss_var$pct_miss, threshold) * 1.4),
+                       labels = function(x) paste0(x, "%")) +
+    labs(title = paste0("% manquant par variable (seuil alerte : ", threshold, "%)"),
+         x = NULL, y = "% manquant") +
+    theme_minimal(base_size = 10) +
+    theme(plot.title = element_text(face = "bold"))
+
+  # ── Assemblage ───────────────────────────────────────────────────────────────
+  combined <- (p1 | (p2 / p3)) +
+    patchwork::plot_layout(widths = c(2, 1)) +
+    patchwork::plot_annotation(
+      title = "Analyse des données manquantes — Vue d'ensemble",
+      theme = theme(plot.title = element_text(face = "bold", size = 14))
+    )
+
+  if (!is.null(png_path)) {
+    ggsave(png_path, combined, width = width, height = height, dpi = dpi)
+    message("Graphique sauvegardé : ", png_path)
+  }
+
+  print(combined)
+
+  return(invisible(list(
+    pattern_table = pattern_tab,
+    miss_per_var  = miss_var,
+    indicator     = ind[, c(vars, "pattern")]
+  )))
+}
+```
+
+
+```{r}
+# ==============================================================================
+# Fonction : plot_missing_mar_explore
+# ==============================================================================
+#
+# Description :
+# Aide à distinguer MAR de MNAR en visualisant si la distribution d'un
+# prédicteur Y diffère selon que la variable cible X est observée ou manquante.
+#
+#   Si distribution de Y | (X observé) ≠ distribution de Y | (X manquant)
+#     → La manquance de X est liée à Y → pattern MAR via Y
+#
+# La fonction s'adapte automatiquement au TYPE du prédicteur :
+#
+#   ┌─────────────────────────────┬──────────────────────┬─────────────────┐
+#   │ Type du prédicteur          │ Graphique             │ Test            │
+#   ├─────────────────────────────┼──────────────────────┼─────────────────┤
+#   │ Continu (numérique, >2 val) │ Boxplot + jitter      │ Wilcoxon        │
+#   │ Binaire (2 modalités)       │ Barres de proportions │ Fisher exact    │
+#   │ Catégoriel (>2 modalités)   │ Barres de proportions │ Chi-carré       │
+#   └─────────────────────────────┴──────────────────────┴─────────────────┘
+#
+# Lecture du graphique :
+#   Continu  : boîtes à niveaux différents → MAR probable
+#   Binaire/Catégoriel : barres de proportions différentes entre les deux groupes → MAR probable
+#   Titre en rouge + gras = différence significative (p < alpha)
+#
+#   Aucune différence sur aucun prédicteur → deux possibilités :
+#     a) MCAR : manquance vraiment aléatoire
+#     b) MNAR : manquance liée à la valeur propre de la cible (non détectable ici)
+#     → seule la connaissance clinique permet de trancher
+#
+# Arguments :
+# - df             : data.frame
+# - target_vars    : variables cibles dont on étudie la manquance (avec des NA)
+# - predictor_vars : prédicteurs à comparer entre groupes obs/manquant
+#                    (NULL = toutes variables sauf target_vars, numériques +
+#                     factor + character)
+# - labels_list    : liste nommée variable → label affiché
+# - color_obs      : couleur groupe "observé"   (défaut "steelblue")
+# - color_miss     : couleur groupe "manquant"  (défaut "tomato")
+# - alpha          : seuil de significativité   (défaut 0.05)
+# - ncol           : colonnes dans la grille par variable cible
+# - png_path       : chemin de sauvegarde PNG (optionnel ; un fichier par cible)
+# - width, height, dpi : dimensions de l'image exportée
+#
+# Valeur retournée (invisible) :
+# - $plots : liste nommée (par target) de patchwork
+# - $tests : data.frame avec une ligne par couple (target, predictor) :
+#     target, predictor, type_pred, n_obs, n_miss,
+#     p_value, test_utilise, significatif, interpretation
+#
+# Dépendances : ggplot2, patchwork, dplyr
+# ==============================================================================
+plot_missing_mar_explore <- function(
+  df,
+  target_vars,
+  predictor_vars = NULL,
+  labels_list    = NULL,
+  color_obs      = "steelblue",
+  color_miss     = "tomato",
+  alpha          = 0.05,
+  ncol           = 3,
+  png_path       = NULL,
+  width          = 16,
+  height         = 8,
+  dpi            = 300
+) {
+
+  # ── Validation des cibles ────────────────────────────────────────────────────
+  target_vars <- target_vars[target_vars %in% names(df)]
+  target_vars <- target_vars[colSums(is.na(df[, target_vars, drop = FALSE])) > 0]
+
+  if (length(target_vars) == 0)
+    stop("Aucune variable cible avec des NA trouvée dans df.")
+
+  # ── Sélection automatique des prédicteurs ────────────────────────────────────
+  # Accepte : numériques, factor, character — exclut les cibles
+  if (is.null(predictor_vars)) {
+    eligible <- names(df)[sapply(df, function(x)
+      is.numeric(x) || is.factor(x) || is.character(x)
+    )]
+    predictor_vars <- setdiff(eligible, target_vars)
+  }
+  predictor_vars <- predictor_vars[predictor_vars %in% names(df)]
+
+  if (length(predictor_vars) == 0)
+    stop("Aucun prédicteur valide trouvé (numérique, factor ou character).")
+
+  # ── Helpers ──────────────────────────────────────────────────────────────────
+  get_label <- function(v) {
+    if (!is.null(labels_list) && v %in% names(labels_list)) labels_list[[v]] else v
+  }
+
+  # Détecte le type du prédicteur :
+  #   "continu"    : numérique avec > 2 valeurs distinctes
+  #   "binaire"    : 2 modalités uniques (numérique 0/1, factor, character)
+  #   "categoriel" : factor ou character avec > 2 modalités
+  pred_type <- function(x) {
+    vals <- unique(na.omit(x))
+    if (is.numeric(x) && length(vals) > 2) return("continu")
+    if (length(vals) <= 2)                  return("binaire")
+    return("categoriel")
+  }
+
+  # Formate la p-value avec étoiles
+  fmt_p <- function(p) {
+    if (is.na(p))      return("p = NA")
+    if (p < 0.001)     return("p < 0.001 ***")
+    if (p < 0.01)      return(sprintf("p = %.3f **", p))
+    if (p < 0.05)      return(sprintf("p = %.3f *",  p))
+    return(sprintf("p = %.3f", p))
+  }
+
+  # Thème commun à tous les graphiques
+  theme_mar <- function(is_sig) {
+    theme_minimal(base_size = 10) +
+      theme(
+        plot.title    = element_text(
+          face  = if (is_sig) "bold" else "plain",
+          color = if (is_sig) "darkred" else "black",
+          size  = 10
+        ),
+        plot.subtitle = element_text(
+          size  = 8,
+          color = if (is_sig) "darkred" else "grey50"
+        ),
+        axis.text.x = element_text(size = 8)
+      )
+  }
+
+  all_plots <- list()
+  all_tests <- list()
+
+  # ── Boucle sur les variables cibles ─────────────────────────────────────────
+  for (tv in target_vars) {
+
+    ind_miss <- is.na(df[[tv]])
+    n_obs  <- sum(!ind_miss)
+    n_miss <- sum(ind_miss)
+
+    lbl_obs  <- paste0("Observé (n=",  n_obs,  ")")
+    lbl_miss <- paste0("Manquant (n=", n_miss, ")")
+
+    cat(sprintf("\n── %s : %d observés / %d manquants ──\n",
+                get_label(tv), n_obs, n_miss))
+
+    plot_list <- list()
+    test_rows <- list()
+
+    for (pv in predictor_vars) {
+
+      x     <- df[[pv]]
+      type  <- pred_type(x)
+      grp   <- ifelse(ind_miss, lbl_miss, lbl_obs)
+      pval  <- NA
+      test_nom <- NA
+
+      # ════════════════════════════════════════════════════════════════════════
+      # CAS 1 — CONTINU : boxplot + jitter + Wilcoxon
+      # ════════════════════════════════════════════════════════════════════════
+      if (type == "continu") {
+
+        x_obs  <- x[!ind_miss & !is.na(x)]
+        x_miss <- x[ ind_miss & !is.na(x)]
+        test_nom <- "Wilcoxon"
+
+        if (length(x_obs) >= 3 && length(x_miss) >= 3)
+          pval <- tryCatch(
+            wilcox.test(x_obs, x_miss, exact = FALSE)$p.value,
+            error = function(e) NA
+          )
+
+        is_sig <- !is.na(pval) && pval < alpha
+
+        df_p <- data.frame(
+          grp   = factor(grp, levels = c(lbl_obs, lbl_miss)),
+          value = x
+        ) |> dplyr::filter(!is.na(value))
+
+        p <- ggplot(df_p, aes(x = grp, y = value, fill = grp)) +
+          geom_boxplot(outlier.size = 1.2, width = 0.5, alpha = 0.8) +
+          geom_jitter(width = 0.12, size = 0.8, alpha = 0.35) +
+          scale_fill_manual(
+            values = c(lbl_obs, lbl_miss) |>
+              setNames(c(color_obs, color_miss)) |>
+              rev(),
+            guide = "none"
+          ) +
+          labs(
+            title    = get_label(pv),
+            subtitle = fmt_p(pval),
+            x = NULL, y = "Valeur"
+          ) +
+          theme_mar(is_sig)
+
+        test_rows[[pv]] <- data.frame(
+          target       = tv,
+          predictor    = pv,
+          type_pred    = "continu",
+          n_obs        = length(x_obs),
+          n_miss       = length(x_miss),
+          p_value      = round(pval, 4),
+          test_utilise = test_nom,
+          significatif = is_sig,
+          interpretation = if (is_sig)
+            "MAR probable (distribution du prédicteur diffère entre groupes)"
+          else
+            "Pas de différence détectée",
+          stringsAsFactors = FALSE
+        )
+
+      # ════════════════════════════════════════════════════════════════════════
+      # CAS 2 — BINAIRE : barres de proportions + Fisher exact
+      # ════════════════════════════════════════════════════════════════════════
+      } else if (type == "binaire") {
+
+        x_char <- as.character(x)
+        test_nom <- "Fisher"
+
+        df_p <- data.frame(
+          grp      = factor(grp, levels = c(lbl_obs, lbl_miss)),
+          modalite = x_char
+        ) |> dplyr::filter(!is.na(modalite))
+
+        # Table de contingence et test Fisher
+        tbl <- table(df_p$grp, df_p$modalite)
+        pval <- tryCatch(
+          fisher.test(tbl)$p.value,
+          error = function(e) NA
+        )
+
+        is_sig <- !is.na(pval) && pval < alpha
+
+        # Proportions pour le graphique
+        df_prop <- df_p |>
+          dplyr::count(grp, modalite) |>
+          dplyr::group_by(grp) |>
+          dplyr::mutate(pct = n / sum(n) * 100) |>
+          dplyr::ungroup()
+
+        p <- ggplot(df_prop,
+                    aes(x = grp, y = pct,
+                        fill = grp, alpha = modalite)) +
+          geom_col(position = "stack", width = 0.55) +
+          geom_text(aes(label = sprintf("%.0f%%", pct)),
+                    position = position_stack(vjust = 0.5),
+                    size = 3, color = "white", fontface = "bold") +
+          scale_fill_manual(
+            values = setNames(c(color_obs, color_miss),
+                              c(lbl_obs, lbl_miss)),
+            guide = "none"
+          ) +
+          scale_alpha_manual(
+            values = setNames(c(0.9, 0.45),
+                              levels(factor(df_prop$modalite))),
+            name = NULL
+          ) +
+          labs(
+            title    = get_label(pv),
+            subtitle = paste0(fmt_p(pval), "  [Fisher]"),
+            x = NULL, y = "% dans le groupe"
+          ) +
+          theme_mar(is_sig) +
+          theme(legend.position = "bottom",
+                legend.text     = element_text(size = 7))
+
+        n_obs_v  <- sum(!ind_miss & !is.na(x))
+        n_miss_v <- sum( ind_miss & !is.na(x))
+
+        test_rows[[pv]] <- data.frame(
+          target       = tv,
+          predictor    = pv,
+          type_pred    = "binaire",
+          n_obs        = n_obs_v,
+          n_miss       = n_miss_v,
+          p_value      = round(pval, 4),
+          test_utilise = test_nom,
+          significatif = is_sig,
+          interpretation = if (is_sig)
+            "MAR probable (proportions de modalités différentes entre groupes)"
+          else
+            "Pas de différence détectée",
+          stringsAsFactors = FALSE
+        )
+
+      # ════════════════════════════════════════════════════════════════════════
+      # CAS 3 — CATÉGORIEL : barres de proportions + Chi-carré
+      # ════════════════════════════════════════════════════════════════════════
+      } else {
+
+        x_char <- as.character(x)
+        test_nom <- "Chi-carré"
+
+        df_p <- data.frame(
+          grp      = factor(grp, levels = c(lbl_obs, lbl_miss)),
+          modalite = x_char
+        ) |> dplyr::filter(!is.na(modalite))
+
+        tbl  <- table(df_p$grp, df_p$modalite)
+        pval <- tryCatch(
+          chisq.test(tbl, correct = FALSE)$p.value,
+          error = function(e) NA
+        )
+
+        is_sig <- !is.na(pval) && pval < alpha
+
+        df_prop <- df_p |>
+          dplyr::count(grp, modalite) |>
+          dplyr::group_by(grp) |>
+          dplyr::mutate(pct = n / sum(n) * 100) |>
+          dplyr::ungroup()
+
+        # Palette de gris pour les modalités (neutres — couleur du groupe déjà
+        # portée par fill)
+        n_mod <- length(unique(df_prop$modalite))
+        alphas_cat <- seq(0.9, 0.3, length.out = n_mod)
+
+        p <- ggplot(df_prop,
+                    aes(x = grp, y = pct,
+                        fill = grp, alpha = modalite)) +
+          geom_col(position = "stack", width = 0.55) +
+          geom_text(aes(label = ifelse(pct >= 5,
+                                       sprintf("%.0f%%", pct), "")),
+                    position = position_stack(vjust = 0.5),
+                    size = 2.8, color = "white", fontface = "bold") +
+          scale_fill_manual(
+            values = setNames(c(color_obs, color_miss),
+                              c(lbl_obs, lbl_miss)),
+            guide = "none"
+          ) +
+          scale_alpha_manual(
+            values = setNames(alphas_cat,
+                              levels(factor(df_prop$modalite))),
+            name = NULL
+          ) +
+          labs(
+            title    = get_label(pv),
+            subtitle = paste0(fmt_p(pval), "  [χ²]"),
+            x = NULL, y = "% dans le groupe"
+          ) +
+          theme_mar(is_sig) +
+          theme(legend.position = "bottom",
+                legend.text     = element_text(size = 7),
+                legend.key.size = unit(0.5, "lines"))
+
+        n_obs_v  <- sum(!ind_miss & !is.na(x))
+        n_miss_v <- sum( ind_miss & !is.na(x))
+
+        test_rows[[pv]] <- data.frame(
+          target       = tv,
+          predictor    = pv,
+          type_pred    = "categoriel",
+          n_obs        = n_obs_v,
+          n_miss       = n_miss_v,
+          p_value      = round(pval, 4),
+          test_utilise = test_nom,
+          significatif = is_sig,
+          interpretation = if (is_sig)
+            "MAR probable (distribution des modalités différente entre groupes)"
+          else
+            "Pas de différence détectée",
+          stringsAsFactors = FALSE
+        )
+      }
+
+      plot_list[[pv]] <- p
+
+    } # fin boucle prédicteurs
+
+    # ── Assemblage en grille pour cette variable cible ───────────────────────
+    nrow_g <- ceiling(length(plot_list) / ncol)
+    p_combined <- patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow_g) +
+      patchwork::plot_annotation(
+        title    = paste0("Prédicteurs selon la manquance de : ",
+                          get_label(tv)),
+        subtitle = paste0(
+          "Bleu = '", tv, "' observé  |  Rouge = '", tv, "' manquant\n",
+          "Continu → boxplot (Wilcoxon)  |  Binaire → proportions (Fisher)  ",
+          "|  Catégoriel → proportions (χ²)\n",
+          "Titre rouge + gras = différence significative (p < ", alpha,
+          ") → MAR probable"
+        ),
+        theme = theme(
+          plot.title    = element_text(face = "bold", size = 12),
+          plot.subtitle = element_text(size = 8, color = "grey40")
+        )
+      )
+
+    if (!is.null(png_path)) {
+      path_tv <- sub("\\.png$", paste0("_", tv, ".png"), png_path)
+      ggsave(path_tv, p_combined, width = width, height = height, dpi = dpi)
+      message("Graphique sauvegardé : ", path_tv)
+    }
+
+    print(p_combined)
+    all_plots[[tv]] <- p_combined
+
+    tests_tv <- dplyr::bind_rows(test_rows)
+    all_tests[[tv]] <- tests_tv
+
+    # ── Résumé console ───────────────────────────────────────────────────────
+    sig <- tests_tv[tests_tv$significatif, ]
+    if (nrow(sig) > 0) {
+      for (i in seq_len(nrow(sig)))
+        cat(sprintf("  ⚠  MAR via %-15s [%s, %s]\n",
+                    sig$predictor[i], sig$type_pred[i], fmt_p(sig$p_value[i])))
+    } else {
+      cat(sprintf("  ✔  Aucune association → MCAR possible ou MNAR (vérifier cliniquement)\n"))
+    }
+
+  } # fin boucle cibles
+
+  return(invisible(list(
+    plots = all_plots,
+    tests = dplyr::bind_rows(all_tests)
+  )))
+}
+```
+
+

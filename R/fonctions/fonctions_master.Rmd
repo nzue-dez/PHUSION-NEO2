@@ -1,0 +1,151 @@
+---
+title: "Bibliothèque de fonctions — Master"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX DES FONCTIONS — ENSEMBLE_FONCTIONS/fonctions.Rmd
+# =============================================================================
+#
+# DONNÉES MANQUANTES & IMPORT
+#   export_missing_data_table  — Tableau des données manquantes → Word
+#   missing_plot               — Graphique (heatmap) des données manquantes
+#   plot_missing_patterns      — Heatmap obs×vars + patterns + % par variable (vue complète)
+#   plot_missing_mar_explore   — Boxplots obs vs manquant pour distinguer MAR de MNAR
+#
+# STATISTIQUES DESCRIPTIVES
+#   descriptive_report         — Rapport descriptif complet (quanti + quali)
+#   stat_quant                 — Médiane (Q1–Q3) compacte pour une variable
+#   stat_qual                  — Effectifs et % pour une variable qualitative
+#   stat_quant_full            — Statistiques quantitatives détaillées
+#   correlation_table          — Tableau de corrélations (Pearson/Spearman) GT
+#
+# VISUALISATION — DISTRIBUTIONS & CORRÉLATIONS
+#   plot_density               — Courbes de densité (groupes, facettes)
+#   plot_density_sharp         — Courbes de densité à contour net
+#   plot_box_points            — Boxplots avec points, observation IDs et extrêmes
+#   plot_range_check           — Strip plot avec plage 95% auto + points hors plage en rouge
+#   plot_scatter_pairs         — Scatter plots deux à deux + coefficient de corrélation
+#   plot_corr_group_to_targets — Scatter plots groupe → cibles (v1)
+#   plot_corr_group_to_targets2— Scatter plots groupe → cibles, style publication (v2)
+#
+# VISUALISATION — ÉVOLUTION LONGITUDINALE (spaghetti plots)
+#   plot_evolutive             — Trajectoires individuelles, sans groupe
+#   plot_evolutive2            — + variable de groupe + statistiques intra/inter
+#   plot_evolutive3            — + annotations textuelles sur graphique (v3)
+#   plot_evolutive4            — Version finale robuste + text_size/base_size (v4)
+#
+# TESTS STATISTIQUES
+#   normality_report           — Tests de normalité (Shapiro / Anderson-Darling)
+#   qqplots_graph              — Q-Q plots pour vérification visuelle de normalité
+#   homogeneity_report         — Tests d'homogénéité des variances (Levene/BF)
+#   apply_tests_by_group       — Tests bivariés automatiques (Student/Wilcoxon/Chi²)
+#   choose_independence_test   — Choix automatique du test d'indépendance
+#   calc_expected              — Effectifs théoriques pour test du Chi²
+#
+# CONTRÔLE QUALITÉ DES VARIABLES
+#   plot_range_check           — Strip plot avec plage 95% + obs. hors plage colorées (quanti)
+#   check_dominance_qual       — Détection de modalité dominante (> seuil%) pour exclusion (quali)
+#
+# PRÉPARATION DES DONNÉES
+#   standardize_vars           — Standardisation (z-score) sélective de variables
+#   standardize_data           — Centrer-réduire toutes les variables numériques
+#   transform_to_numeric       — Convertir des variables en numérique
+#   transform_to_factor        — Convertir en facteur avec labels personnalisés
+#   convert_posixct_to_date    — Convertir POSIXct → Date
+#   var_chr                    — Lister les variables de type character
+#   var_factor                 — Lister les variables de type factor
+#   var_num                    — Lister les variables numériques
+#   get_vars_type              — Lister variables par classe (inherits)
+#   get_vars_pattern           — Sélectionner variables par motif dans leur nom
+#   get_variable_positions     — Positions des variables dans un data.frame
+#   select_between             — Sélectionner colonnes entre deux variables
+#   select_vars                — Sélectionner colonnes par motifs (patterns_list)
+#   check_vars_table           — Vérifier la présence de variables
+#   remove_obs_multi_vars      — Supprimer observations selon conditions (OR/AND)
+#   replace_char_multiple      — Remplacer valeurs dans plusieurs colonnes
+#   detect_vars_with_value_patterns — Détecter colonnes contenant des valeurs cibles
+#   filter_by_pattern_multi    — Filtrer observations par motifs texte (une variable)
+#   filter_by_two_patterns     — Filtrer sur deux variables texte simultanément
+#   check_and_extract          — Vérifier et extraire lignes par identifiants
+#
+# EXPORT & TABLEAUX
+#   table_to_word              — Exporter un data.frame en tableau Word
+#   export_estimates_table     — Tableau d'estimations (OR, IC, p-value) → Word
+#   export_decisionnel_logistique — Tableau décisionnel logistique → Word (GT)
+#   export_bootstrap_logistic  — OR bootstrap → Word (flextable)
+#
+# MACHINE LEARNING
+#   compute_metrics            — Métriques de classification binaire (accuracy, F1…)
+#   create_folds_stratified    — K-folds stratifiés pour validation croisée
+#   split_train_test_stratified— Split train/test stratifié
+#   split_train_val_test       — Split train/validation/test stratifié
+#   predict_model              — Entraînement + prédiction (lm/glm)
+#   run_cross_validation       — Validation croisée stratifiée avec tableau GT
+#   plot_roc_val_test          — Courbes ROC validation + test + indice Youden
+#   stability_selection        — Sélection variables par bootstrap + Elastic Net/LASSO
+#
+# SURVIE & DONNÉES HOSPITALIÈRES
+#   flag_suicide_event         — Indicateur événement suicidaire
+#   get_index_hospitalization  — Premier séjour suicidaire (date index)
+#   get_post_index_stays       — Séjours post-index
+#   get_first_rehospitalisation— Première réhospitalisation après index
+#   build_survival_dataset     — Dataset prêt pour analyse de survie (time/event)
+#   find_best_cut_gray         — Seuil optimal par test de Gray (risques compétitifs)
+#
+# =============================================================================
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+## Chargement des fichiers enfants
+
+```{r child-utilitaires, child="01_utilitaires.Rmd"}
+```
+
+```{r child-qualite, child="02_qualite_manquantes.Rmd"}
+```
+
+```{r child-stats, child="03_statistiques_viz.Rmd"}
+```
+
+```{r child-modeles, child="04_modelisation.Rmd"}
+```
+
+```{r child-export, child="05_export.Rmd"}
+```
+
+```{r child-survie, child="06_survie.Rmd"}
+```

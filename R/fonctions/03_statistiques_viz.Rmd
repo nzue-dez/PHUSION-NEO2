@@ -1,0 +1,2779 @@
+---
+title: "Statistiques descriptives & Visualisation"
+output: html_document
+date: "2025-12-05"
+---
+
+```{r echo=FALSE}
+# =============================================================================
+# INDEX — 03_statistiques_viz.Rmd
+# =============================================================================
+#
+# STATISTIQUES DESCRIPTIVES
+#   descriptive_report         — Rapport descriptif complet (quanti + quali)
+#   stat_quant                 — Médiane (Q1–Q3) compacte
+#   stat_qual                  — Effectifs et % pour une variable qualitative
+#   stat_quant_full            — Statistiques quantitatives détaillées
+#   correlation_table          — Tableau de corrélations (Pearson/Spearman) GT
+#
+# TESTS STATISTIQUES
+#   normality_report           — Tests de normalité (Shapiro / Anderson-Darling)
+#   qqplots_graph              — Q-Q plots pour vérification visuelle
+#   homogeneity_report         — Tests d'homogénéité des variances (Levene/BF)
+#   apply_tests_by_group       — Tests bivariés automatiques (Student/Wilcoxon/Chi²)
+#   choose_independence_test   — Choix automatique du test d'indépendance
+#   calc_expected              — Effectifs théoriques pour test du Chi²
+#
+# VISUALISATION — DISTRIBUTIONS & CORRÉLATIONS
+#   plot_density               — Courbes de densité (groupes, facettes)
+#   plot_density_sharp         — Courbes de densité à contour net
+#   plot_box_points            — Boxplots avec points et valeurs extrêmes
+#   plot_scatter_pairs         — Scatter plots deux à deux + corrélation
+#   plot_corr_group_to_targets — Scatter plots groupe → cibles (v1)
+#   plot_corr_group_to_targets2— Scatter plots groupe → cibles, style publication (v2)
+#
+# VISUALISATION — ÉVOLUTION LONGITUDINALE (spaghetti plots)
+#   plot_evolutive             — Trajectoires individuelles, sans groupe
+#   plot_evolutive2            — + variable de groupe + statistiques intra/inter
+#   plot_evolutive3            — + annotations textuelles (v3)
+#   plot_evolutive4            — Version finale robuste (v4)
+# =============================================================================
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Packages nécessaires
+# ------------------------------------------------------------------
+if(!require(nortest))   install.packages("nortest")
+if(!require(officer))   install.packages("officer")
+if(!require(flextable)) install.packages("flextable")
+if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
+if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
+if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+
+library(nortest)   # pour le test de normalité d'Anderson Darling
+library(officer)
+library(flextable)
+library(dplyr)
+library(car)       # pour leveneTest ou même son modifié c'est-à-dire Brown-forsythe
+library(ggplot2)
+library(patchwork) # pour organiser la grille d'affichage des graphiques
+library(e1071)
+library(moments)
+library(purrr)
+library(tibble)
+library(gt)
+library(tidyr)
+library(openxlsx)  # export Excel dans missing_plot
+library(pROC)      # courbes ROC dans plot_roc_val_test
+library(glmnet)    # Elastic Net dans stability_selection
+
+```
+
+
+```{r}
+###########################################################################################################################################
+# Fonction (1)
+# ------------------------------------------------------------------
+# Fonction : descriptive_report
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction génère un tableau de statistiques descriptives pour
+# un ensemble de variables numériques, avec ou sans variable de groupe.
+# Elle calcule des indicateurs classiques (min, max, médiane, quartiles,
+# moyenne, écart-type, skewness, kurtosis) et exporte les résultats
+# dans un document Word.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - vars : vecteur de noms de variables à analyser
+# - group_var : (optionnel) nom de la variable de regroupement
+#               → si NULL, analyse globale
+# - labels_list : (optionnel) liste nommée pour renommer les variables
+# - word_path : chemin du fichier Word de sortie (par défaut : "descriptifs.docx")
+#
+# Fonctionnement :
+# - Si aucune variable de groupe n’est fournie :
+#     → calcule les statistiques sur l’ensemble des données
+# - Si une variable de groupe est fournie :
+#     → calcule les statistiques pour chaque modalité du groupe
+# - Les valeurs manquantes (NA) sont comptabilisées
+# - Les résultats sont formatés sous forme de texte pour chaque indicateur
+#
+# Sortie :
+# - Retourne un data.frame contenant toutes les statistiques
+# - Génère un document Word avec un tableau formaté (flextable)
+#
+# Dépendances :
+# - dplyr (bind_rows)
+# - officer (read_docx, body_add_par, print)
+# - flextable
+# - moments (skewness, kurtosis)
+#
+# Remarques :
+# - Les variables doivent être numériques pour que les statistiques soient valides
+# - Les NA sont exclus des calculs statistiques mais comptabilisés
+# - Le format des résultats est textuel (prêt pour reporting)
+# ------------------------------------------------------------------
+descriptive_report <- function(df, vars, group_var = NULL,
+                                     labels_list = NULL,
+                                     word_path = "descriptifs.docx") {
+  
+  
+  results <- list()
+  
+  # Si pas de groupe → analyse globale
+  if (is.null(group_var)) {
+    grp_levels <- "Total"
+  } else {
+    grp_levels <- unique(df[[group_var]])
+  }
+  
+  for (v in vars) {
+    
+    # Label
+    lab <- if (!is.null(labels_list) && v %in% names(labels_list)) labels_list[[v]] else v
+    
+    # Fonction interne pour stats d’un sous-groupe
+    get_stats <- function(x) {
+      x_noNA <- x[!is.na(x)]
+      
+      list(
+        min_max   = sprintf("%.2f - %.2f", min(x_noNA), max(x_noNA)),
+        median_Q  = sprintf("%.2f (%.2f, %.2f)",
+                            median(x_noNA),
+                            quantile(x_noNA, .25),
+                            quantile(x_noNA, .75)),
+        mean_sd   = sprintf("%.2f (%.2f)", mean(x_noNA), sd(x_noNA)),
+        skew_kurt = sprintf("%.2f, %.2f", skewness(x_noNA), kurtosis(x_noNA))
+      )
+    }
+    
+    # ---- CAS 1 : PAS DE GROUPE ----
+    if (is.null(group_var)) {
+      x <- df[[v]]
+      NA_count <- sum(is.na(x))
+      
+      st <- get_stats(x)
+      
+      results[[v]] <- data.frame(
+        variable = v,
+        label = lab,
+        groupe = "Total",
+        missing_label = "NA",
+        missing = NA_count,
+        min_max = st$min_max,
+        median_Q1_Q3 = st$median_Q,
+        mean_sd = st$mean_sd,
+        skew_kurtosis = st$skew_kurt,
+        stringsAsFactors = FALSE
+      )
+      
+      next
+    }
+    
+    # ---- CAS 2 : GROUP_VAR FOURNI ----
+    df_split <- split(df[[v]], df[[group_var]])
+    
+    # nombre de NA par groupe
+    NA_by_group <- sapply(df_split, function(x) sum(is.na(x)))
+    
+    # stats par groupe
+    stats_list <- lapply(df_split, get_stats)
+    
+    # fusion min-max, median, etc.
+    st <- stats_list[[1]]
+    
+    results[[v]] <- data.frame(
+      variable = v,
+      label = lab,
+      groupe = paste(grp_levels, collapse = ", "),
+      missing_label = paste0("NA_", paste(grp_levels, collapse = ", NA_")),
+      missing = paste(NA_by_group, collapse = ", "),
+      min_max = paste(sapply(stats_list, function(s) s$min_max), collapse = " | "),
+      median_Q1_Q3 = paste(sapply(stats_list, function(s) s$median_Q), collapse = " | "),
+      mean_sd = paste(sapply(stats_list, function(s) s$mean_sd), collapse = " | "),
+      skew_kurtosis = paste(sapply(stats_list, function(s) s$skew_kurt), collapse = " | "),
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Tableau final
+  df_res <- bind_rows(results)
+  
+  # Export Word
+  doc <- read_docx() %>%
+    body_add_par("Statistiques descriptives", style = "heading 1") %>%
+    body_add_flextable(
+      flextable(df_res) %>% autofit()
+    )
+  
+  print(doc, target = word_path)
+  message("Document Word exporté : ", word_path)
+  
+  return(df_res)
+}
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (2)
+# ------------------------------------------------------------------
+# Fonction : plot_density
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction génère des graphiques de densité pour une ou plusieurs
+# variables numériques, avec possibilité de comparaison entre groupes.
+# Les graphiques sont combinés en une seule figure et peuvent être exportés
+# au format PNG.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - vars : vecteur des variables numériques à représenter
+# - group_var : (optionnel) variable de regroupement
+#               → si NULL ou une seule modalité : densité globale
+# - colors : (optionnel) vecteur de couleurs pour les groupes
+# - labels_list : (optionnel) liste nommée pour renommer les axes x
+# - ncol, nrow : (optionnel) organisation des graphiques (layout)
+# - ylim : limites de l’axe y par défaut (densité)
+# - xlim : limites de l’axe x par défaut
+# - xlim_list : (optionnel) liste de xlim spécifiques par variable
+# - ylim_list : (optionnel) liste de ylim spécifiques par variable
+# - png_path : (optionnel) chemin pour sauvegarder l’image
+# - width, height : dimensions de l’image exportée
+#
+# Fonctionnement :
+# - Si aucune variable de groupe valide :
+#     → création d’un groupe "Total" (densité globale)
+# - Sinon :
+#     → tracé des densités par groupe avec couleurs distinctes
+# - Pour chaque variable :
+#     → création d’un graphique ggplot2 avec geom_density()
+#     → application des limites d’axes (globales ou spécifiques)
+# - Les graphiques sont combinés avec patchwork
+#
+# Sortie :
+# - Affiche les graphiques combinés
+# - Retourne l’objet graphique (patchwork)
+# - Sauvegarde en PNG si un chemin est fourni
+#
+# Dépendances :
+# - ggplot2
+# - patchwork
+# - scales (pour palette automatique)
+#
+# Remarques :
+# - Les variables doivent être numériques
+# - Les NA sont ignorés automatiquement par ggplot2
+# - Vérifier que le nombre de couleurs ≥ nombre de groupes
+# ------------------------------------------------------------------
+plot_density <- function(
+  df,
+  vars,
+  group_var = NULL,
+  colors = NULL,
+  labels_list = NULL,
+  ncol = NULL,
+  nrow = NULL,
+  ylim = c(0, 0.05),          # ylim par défaut
+  xlim = NULL,                # xlim par défaut (optionnel)
+  xlim_list = NULL,           # xlim spécifiques
+  ylim_list = NULL,           # ylim spécifiques
+  png_path = NULL,
+  width = 10,
+  height = 6
+) {
+  
+  # =========================
+  # Gestion du groupe
+  # =========================
+  
+  if (is.null(group_var) || length(unique(df[[group_var]])) < 2) {
+    warning("La variable de groupe n'a qu'une seule valeur unique ou n'est pas fournie. Densité globale.")
+    df$.__total__ <- "Total"
+    group_var <- ".__total__"
+    n_groups <- 1
+    
+    if (is.null(colors)) colors <- "blue"
+    
+  } else {
+    n_groups <- length(unique(df[[group_var]]))
+    
+    if (is.null(colors)) {
+      colors <- scales::hue_pal()(n_groups)
+    } else if (length(colors) < n_groups) {
+      stop("Nombre de couleurs inférieur au nombre de groupes.")
+    }
+  }
+  
+  plot_list <- list()
+  
+  # =========================
+  # Boucle sur les variables
+  # =========================
+  
+  for (v in vars) {
+    
+    # Label
+    lab <- if (!is.null(labels_list) && v %in% names(labels_list)) {
+      labels_list[[v]]
+    } else v
+    
+    # xlim spécifique ou par défaut
+    xlim_v <- if (!is.null(xlim_list) && v %in% names(xlim_list)) {
+      xlim_list[[v]]
+    } else {
+      xlim
+    }
+    
+    # ylim spécifique ou par défaut
+    ylim_v <- if (!is.null(ylim_list) && v %in% names(ylim_list)) {
+      ylim_list[[v]]
+    } else {
+      ylim
+    }
+    
+    p <- ggplot(df, aes(x = .data[[v]], color = .data[[group_var]], fill = .data[[group_var]])) +
+      geom_density(alpha = 0.3) +
+      scale_fill_manual(values = colors) +
+      scale_color_manual(values = colors) +
+      labs(x = lab, y = "Densité") +
+      coord_cartesian(xlim = xlim_v, ylim = ylim_v) +
+      theme_minimal() +
+      theme(legend.title = element_blank())
+    
+    plot_list[[v]] <- p
+  }
+  
+  # =========================
+  # Organisation des graphiques
+  # =========================
+  
+  if (is.null(ncol) && is.null(nrow)) {
+    combined_plot <- patchwork::wrap_plots(plot_list)
+  } else {
+    combined_plot <- patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow)
+  }
+  
+  # =========================
+  # Sauvegarde
+  # =========================
+  
+  if (!is.null(png_path)) {
+    ggsave(png_path, combined_plot, width = width, height = height)
+    message("Plot enregistré dans : ", png_path)
+  }
+  
+  print(combined_plot)
+  return(combined_plot)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_density_sharp
+# ------------------------------------------------------------------
+# Description :
+# Variante de plot_density produisant des courbes de densité à contour
+# "net" (kernel density estimation avec bande passante resserrée).
+# Génère un graphique par variable, avec support optionnel d'une
+# variable de groupe et de limites d'axes personnalisées.
+#
+# Arguments :
+# - df         : data.frame contenant les données
+# - vars        : vecteur de noms de variables numériques à tracer
+# - group_var   : nom de la variable de groupe (factor, optionnel).
+#                 Si NULL ou une seule valeur unique, densité globale.
+# - colors      : vecteur de couleurs (une par groupe). Si NULL, palette auto.
+# - labels_list : liste nommée associant chaque variable à un label lisible
+# - ncol        : nombre de colonnes dans la disposition des graphiques
+# - nrow        : nombre de lignes dans la disposition des graphiques
+# - ylim        : limites de l'axe Y communes à tous les graphiques (vecteur c(min, max))
+# - xlim        : limites de l'axe X communes à tous les graphiques (vecteur c(min, max))
+# - xlim_list   : liste nommée de limites X spécifiques par variable
+#                 (écrase xlim pour les variables concernées)
+# - ylim_list   : liste nommée de limites Y spécifiques par variable
+#                 (écrase ylim pour les variables concernées)
+# - png_path    : chemin de sauvegarde du graphique (.png). Si NULL, affichage seulement.
+# - width       : largeur de l'image exportée (en pouces)
+# - height      : hauteur de l'image exportée (en pouces)
+#
+# Valeur retournée :
+# - Objet ggplot combiné (patchwork), affiché et retourné silencieusement.
+#
+# Dépendances :
+# - ggplot2, patchwork, scales
+#
+# Remarques :
+# - Utile pour visualiser la distribution de variables quantitatives
+#   avec ou sans distinction par groupe, avant une analyse statistique.
+# - La variante "sharp" (net) est recommandée pour des distributions
+#   relativement concentrées (ex. mesures cliniques standardisées).
+# ------------------------------------------------------------------
+plot_density_sharp <- function(
+  df,
+  vars,
+  group_var = NULL,
+  colors = NULL,
+  labels_list = NULL,
+  ncol = NULL,
+  nrow = NULL,
+  ylim = c(0, 0.05),
+  xlim = NULL,
+  xlim_list = NULL,
+  ylim_list = NULL,
+  png_path = NULL,
+  width = 10,
+  height = 6
+) {
+  
+  # =========================
+  # Gestion du groupe
+  # =========================
+  
+  if (is.null(group_var) || length(unique(df[[group_var]])) < 2) {
+    warning("La variable de groupe n'a qu'une seule valeur unique ou n'est pas fournie. Densité globale.")
+    df$.__total__ <- "Total"
+    group_var <- ".__total__"
+    n_groups <- 1
+    
+    if (is.null(colors)) colors <- "blue"
+    
+  } else {
+    n_groups <- length(unique(df[[group_var]]))
+    
+    if (is.null(colors)) {
+      colors <- scales::hue_pal()(n_groups)
+    } else if (length(colors) < n_groups) {
+      stop("Nombre de couleurs inférieur au nombre de groupes.")
+    }
+  }
+  
+  plot_list <- list()
+  
+  # =========================
+  # Boucle sur les variables
+  # =========================
+  
+  for (v in vars) {
+    
+    lab <- if (!is.null(labels_list) && v %in% names(labels_list)) {
+      labels_list[[v]]
+    } else v
+    
+    xlim_v <- if (!is.null(xlim_list) && v %in% names(xlim_list)) {
+      xlim_list[[v]]
+    } else {
+      xlim
+    }
+    
+    ylim_v <- if (!is.null(ylim_list) && v %in% names(ylim_list)) {
+      ylim_list[[v]]
+    } else {
+      ylim
+    }
+    
+    p <- ggplot(df, aes(x = .data[[v]], color = .data[[group_var]], fill = .data[[group_var]])) +
+      geom_density(alpha = 0.3, linewidth = 1) +  # juste plus net
+      scale_fill_manual(values = colors) +
+      scale_color_manual(values = colors) +
+      labs(x = lab, y = "Density") +
+      coord_cartesian(xlim = xlim_v, ylim = ylim_v) +
+      theme_minimal() +
+      theme(
+        legend.title = element_blank(),
+        
+        # 👉 légère amélioration visuelle uniquement
+        panel.grid.major = element_line(color = "grey85", linewidth = 0.3),
+        panel.grid.minor = element_blank(),
+        
+        axis.line = element_line(color = "black", linewidth = 0.5),
+        axis.ticks = element_line(color = "black", linewidth = 0.4),
+        
+        axis.text = element_text(color = "black")
+      )
+    
+    plot_list[[v]] <- p
+  }
+  
+  # =========================
+  # Organisation
+  # =========================
+  
+  if (is.null(ncol) && is.null(nrow)) {
+    combined_plot <- patchwork::wrap_plots(plot_list)
+  } else {
+    combined_plot <- patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow)
+  }
+  
+  # =========================
+  # Sauvegarde
+  # =========================
+  
+  if (!is.null(png_path)) {
+    ggsave(png_path, combined_plot, width = width, height = height, dpi = 300)
+    message("Plot enregistré dans : ", png_path)
+  }
+  
+  print(combined_plot)
+  return(combined_plot)
+}
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (3)
+# ------------------------------------------------------------------
+# Fonction : normality_report
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction évalue la normalité de variables numériques au sein
+# de différents groupes et propose une recommandation de test statistique.
+# Elle applique les tests de Shapiro-Wilk et d’Anderson-Darling pour
+# chaque groupe et exporte les résultats dans un document Word.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - vars : vecteur des variables numériques à tester
+# - group_var : variable de regroupement (obligatoire)
+# - labels_list : (optionnel) liste nommée pour renommer les variables
+# - word_path : chemin du fichier Word de sortie
+#               (par défaut : "rapport_normalite.docx")
+#
+# Fonctionnement :
+# - Vérifie que la variable de groupe est fournie
+# - Pour chaque variable :
+#     → suppression des NA
+#     → application des tests de normalité par groupe :
+#         * Shapiro-Wilk
+#         * Anderson-Darling
+#     → si taille d’échantillon < 3 :
+#         * les tests ne sont pas réalisés (NA)
+# - Génère une recommandation basée sur :
+#     → la significativité des tests
+#     → le nombre de groupes :
+#         * 2 groupes : t-test ou Wilcoxon
+#         * >2 groupes : ANOVA, Welch ou Kruskal-Wallis
+#
+# Sortie :
+# - Retourne un data.frame contenant :
+#     * p-values des tests (par groupe)
+#     * recommandation statistique
+# - Génère un document Word avec un tableau formaté (flextable)
+#
+# Dépendances :
+# - dplyr
+# - nortest (ad.test)
+# - stats (shapiro.test)
+# - officer
+# - flextable
+#
+# Remarques :
+# - Les variables doivent être numériques
+# - Les tests de normalité sont sensibles à la taille d’échantillon
+# - Il est recommandé de compléter avec des diagnostics graphiques
+#   (QQ-plot, histogramme, densité)
+# - Les résultats sont concaténés sous forme textuelle pour chaque groupe
+# ------------------------------------------------------------------
+normality_report <- function(df, vars, group_var = NULL, labels_list = NULL, word_path = "rapport_normalite.docx") {
+  
+  results <- list()
+  
+  # Vérifier que group_var est fourni
+  if(is.null(group_var)) stop("Le test d'homogénéité nécessite une variable de groupe (group_var).")
+  
+  grp_var <- group_var
+  
+  for(v in vars){
+    df_v <- df %>% dplyr::select(all_of(c(grp_var, v))) %>% filter(!is.na(.data[[v]]))
+    
+    sh_p <- c()
+    ad_p <- c()
+    grp_names <- unique(df_v[[grp_var]])
+    
+    for(g in grp_names){
+      x <- df_v %>% filter(.data[[grp_var]] == g) %>% pull(v)
+      x <- x[!is.na(x)]
+      
+      # Décision de ne pas faire les tests lorsque la taille d'échantillon est inférieure à 3.
+      if(length(x) < 3){
+        sh_p <- c(sh_p, NA)
+        ad_p <- c(ad_p, NA)
+      } else {
+        sh_p <- c(sh_p, shapiro.test(x)$p.value)
+        ad_p <- c(ad_p, ad.test(x)$p.value)
+      }
+    }
+    
+    # Recommendation selon normalité et nombre de groupes
+    if(length(grp_names) == 2){ # s'il y a deux groupes
+      rec <- if(all((sh_p > 0.05 | ad_p > 0.05))){
+        "Normale/T test possible"
+      } else if(all(sh_p <= 0.05 & ad_p <= 0.05)){
+        "Non normale/Se tourner vers test non param. (comme Wilcoxon)"
+      } else {
+        "Normalité remise en doute/Vérifier QQ-plot et densité"
+      }
+    } else { # s'il y a plus de deux groupes
+      rec <- if(all((sh_p > 0.05 | ad_p > 0.05))){
+        "Normale/ANOVA possible"
+      } else if(all(sh_p <= 0.05 & ad_p <= 0.05)){
+        "Non normale/Privilégiez Welch ou Kruskal-Wallis"
+      } else {
+        "Normalité remise en doute/Vérifier QQ-plot et densité"
+      }
+    }
+    
+    # Label
+    lab <- if(!is.null(labels_list) & v %in% names(labels_list)) labels_list[[v]] else v
+    
+    # Créer le dataframe pour cette variable
+    results[[v]] <- data.frame(
+      variable = as.character(v),
+      label = as.character(lab),
+      groupe = paste(as.character(grp_names), collapse = ","),
+      shapiro_p = paste(round(sh_p,3), collapse = ","),
+      anderson_p = paste(round(ad_p,3), collapse = ","),
+      recommendation = rec,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Tableau final
+  df_res <- bind_rows(results)
+  
+  # Export Word
+  doc <- read_docx() %>%
+    body_add_par("Rapport de normalité par variable et groupe", style = "heading 1") %>%
+    body_add_flextable(
+      flextable(df_res) %>% autofit()
+    )
+  
+  print(doc, target = word_path)
+  cat("Tableau exporté dans :", word_path, "\n")
+  
+  return(df_res)
+}
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (4)
+# ------------------------------------------------------------------
+# Fonction : qqplots_graph
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction génère des QQ-plots (quantile-quantile plots) pour
+# évaluer visuellement la normalité de variables numériques.
+# Les graphiques peuvent être produits globalement ou par groupe,
+# et exportés au format PNG ou PDF.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - vars : vecteur des variables numériques à analyser
+# - labels : (optionnel) vecteur de labels pour les titres des graphiques
+# - group_var : (optionnel) variable de regroupement
+# - nrow, ncol : (optionnel) organisation de la grille de graphiques
+# - file_path : (optionnel) chemin pour sauvegarder le fichier (.png ou .pdf)
+#
+# Fonctionnement :
+# - Vérifie :
+#     → l’existence des variables
+#     → leur caractère numérique
+#     → la validité de la variable de groupe
+# - Si une variable de groupe est fournie :
+#     → génère un QQ-plot pour chaque combinaison variable × groupe
+# - Sinon :
+#     → génère un QQ-plot par variable
+# - Les valeurs manquantes (NA) sont exclues
+# - Si moins de 3 observations :
+#     → affichage d’un graphique vide avec message
+# - Ajoute une droite de référence (qqline) pour visualiser l’écart à la normalité
+#
+# Sortie :
+# - Affiche les QQ-plots dans une fenêtre graphique ou fichier
+# - Exporte les graphiques si file_path est fourni
+#
+# Dépendances :
+# - base R uniquement (graphics, stats)
+#
+# Remarques :
+# - Les QQ-plots permettent une évaluation visuelle complémentaire aux tests de normalité
+# - Une forte déviation à la droite indique une non-normalité
+# - Adapter nrow/ncol pour améliorer la lisibilité si beaucoup de graphiques
+# ------------------------------------------------------------------
+qqplots_graph <- function(
+  df,
+  vars,
+  labels = NULL,
+  group_var = NULL,
+  nrow = NULL,
+  ncol = NULL,
+  file_path = NULL
+) {
+  
+  # =========================
+  # Vérifications
+  # =========================
+  
+  if (!all(vars %in% names(df)))
+    stop("Certaines variables n'existent pas dans le data.frame.")
+  
+  for (v in vars)
+    if (!is.numeric(df[[v]]))
+      stop(paste("Variable", v, "n'est pas numérique"))
+  
+  if (!is.null(group_var) && !group_var %in% names(df))
+    stop("La variable de groupe n'existe pas dans le data.frame.")
+  
+  # Labels
+  if (is.null(labels)) labels <- vars
+  if (length(labels) != length(vars))
+    stop("Nombre de labels différent du nombre de variables.")
+  
+  # =========================
+  # Gestion du groupe
+  # =========================
+  
+  if (!is.null(group_var)) {
+    groups <- na.omit(unique(df[[group_var]]))
+    ng <- length(groups)
+  } else {
+    groups <- NULL
+    ng <- 1
+  }
+  
+  nv <- length(vars)
+  n_plots <- nv * ng
+  
+  # =========================
+  # Détermination du layout
+  # =========================
+  
+  if (is.null(nrow) && is.null(ncol)) {
+    ncol <- ng
+    nrow <- ceiling(n_plots / ncol)
+  } else if (is.null(nrow)) {
+    nrow <- ceiling(n_plots / ncol)
+  } else if (is.null(ncol)) {
+    ncol <- ceiling(n_plots / nrow)
+  }
+  
+  # =========================
+  # Ouverture device graphique
+  # =========================
+  
+  if (!is.null(file_path)) {
+    ext <- tools::file_ext(file_path)
+    if (tolower(ext) == "png") {
+      png(file_path, width = 5 * ncol * 150, height = 5 * nrow * 150, res = 150)
+    } else if (tolower(ext) == "pdf") {
+      pdf(file_path, width = 5 * ncol, height = 5 * nrow)
+    } else {
+      stop("Extension non supportée (.png ou .pdf uniquement).")
+    }
+  } else {
+    dev.new(width = 5 * ncol, height = 5 * nrow)
+  }
+  
+  par(mfrow = c(nrow, ncol), mai = c(0.6, 0.6, 0.8, 0.2))
+  
+  # =========================
+  # Boucle QQ-plots
+  # =========================
+  
+  for (i in seq_along(vars)) {
+    
+    for (g in seq_len(ng)) {
+      
+      if (is.null(group_var)) {
+        x <- df[[vars[i]]]
+        title <- paste("QQ-plot :", labels[i])
+      } else {
+        grp_val <- groups[g]
+        x <- df[df[[group_var]] == grp_val, vars[i]]
+        title <- paste("QQ-plot :", labels[i], "\n", group_var, "=", grp_val)
+      }
+      
+      x <- x[!is.na(x)]
+      
+      if (length(x) < 3) {
+        plot.new()
+        title(main = paste(title, "\n(données insuffisantes)"))
+        next
+      }
+      
+      qqnorm(x, main = title, pch = 20)
+      qqline(x, col = "red", lwd = 2)
+    }
+  }
+  
+  par(mfrow = c(1, 1))
+  
+  if (!is.null(file_path)) dev.off()
+}
+
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (5)
+# ------------------------------------------------------------------
+# Fonction : homogeneity_report
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction évalue l’homogénéité des variances entre groupes
+# pour un ensemble de variables numériques. Elle applique les tests
+# de Bartlett et de Brown-Forsythe (Levene modifié) et propose une
+# recommandation de test statistique adapté. Les résultats sont
+# exportés dans un document Word.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - vars : vecteur des variables numériques à analyser
+# - group_var : variable de regroupement (obligatoire)
+# - labels_list : (optionnel) liste nommée pour renommer les variables
+# - word_path : chemin du fichier Word de sortie
+#               (par défaut : "rapport_homogeneite.docx")
+#
+# Fonctionnement :
+# - Vérifie que la variable de groupe est fournie
+# - Pour chaque variable :
+#     → suppression des NA
+#     → application des tests d’homogénéité :
+#         * Test de Bartlett (sensible à la normalité)
+#         * Test de Brown-Forsythe (robuste, basé sur la médiane)
+#     → gestion des erreurs via tryCatch (renvoie NA si échec)
+# - Génère une recommandation selon :
+#     → la significativité des tests (p-value)
+#     → le nombre de groupes :
+#         * 2 groupes : t-test ou Wilcoxon
+#         * ≥ 3 groupes : ANOVA ou Kruskal-Wallis
+#
+# Sortie :
+# - Retourne un data.frame contenant :
+#     * p-values des tests d’homogénéité
+#     * recommandation statistique
+# - Génère un document Word avec un tableau formaté (flextable)
+#
+# Dépendances :
+# - dplyr
+# - stats (bartlett.test)
+# - car (leveneTest)
+# - officer
+# - flextable
+#
+# Remarques :
+# - Les variables doivent être numériques
+# - Le test de Bartlett est sensible aux violations de normalité
+# - Le test de Brown-Forsythe est plus robuste
+# - Les résultats doivent être interprétés conjointement avec les tests
+#   de normalité (ex : Shapiro) et les diagnostics graphiques
+# ------------------------------------------------------------------
+homogeneity_report <- function(df, vars, group_var = NULL, labels_list = NULL, word_path = "rapport_homogeneite.docx") {
+  
+  results <- list()
+  
+  # Vérifier que group_var est fourni
+  if(is.null(group_var)) stop("Le test d'homogénéité nécessite une variable de groupe (group_var).")
+  
+  grp_var <- group_var
+  
+  for(v in vars){
+    df_v <- df %>% dplyr::select(all_of(c(grp_var, v))) %>% filter(!is.na(.data[[v]]))
+    
+    grp_names <- unique(df_v[[grp_var]])
+    
+    # Test de Bartlett
+    bart_test <- tryCatch(
+      bartlett.test(as.formula(paste(v, "~", grp_var)), data = df_v),
+      error = function(e) NULL
+    )
+    bart_pval <- if(!is.null(bart_test)) bart_test$p.value else NA
+    
+    # Test de Brown-Forsythe (Levene modifié)
+    bf_test <- tryCatch(
+      car::leveneTest(as.formula(paste(v, "~", grp_var)), data = df_v, center = median),
+      error = function(e) NULL
+    )
+    bf_pval <- if(!is.null(bf_test)) bf_test[1,"Pr(>F)"] else NA
+    
+    # Recommendation selon nombre de groupes et significativité
+    if(length(grp_names) == 2){
+      rec <- if(any(c(bart_pval, bf_pval) > 0.05, na.rm = TRUE)){
+        "Faire t test sous réserve de normalité validée par test ou par visualisation de QQplots"
+      } else {
+        "Faire Wilcoxon"
+      }
+    } else if(length(grp_names) >= 3){
+      rec <- if(any(c(bart_pval, bf_pval) > 0.05, na.rm = TRUE)){
+        "Faire ANOVA sous réserve de normalité validée par test ou par visualisation de QQplots"
+      } else {
+        "Faire Kruskal-Wallis"
+      }
+    } else {
+      rec <- NA
+    }
+    
+    # Label
+    lab <- if(!is.null(labels_list) & v %in% names(labels_list)) labels_list[[v]] else v
+    
+    # Créer le dataframe pour cette variable
+    results[[v]] <- data.frame(
+      variable = as.character(v),
+      label = as.character(lab),
+      groupe = paste(as.character(grp_names), collapse = ","),
+      bartlett_p = round(bart_pval,3),
+      brown_forsythe_p = round(bf_pval,3),
+      recommendation = rec,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Tableau final
+  df_res <- bind_rows(results)
+  
+  # Export Word
+  doc <- read_docx() %>%
+    body_add_par("Rapport d'homogénéité de variance par variable et groupe", style = "heading 1") %>%
+    body_add_flextable(
+      flextable(df_res) %>% autofit()
+    )
+  
+  print(doc, target = word_path)
+  cat("Tableau exporté dans :", word_path, "\n")
+  
+  return(df_res)
+}
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (6)
+# ------------------------------------------------------------------
+# Fonction : apply_tests_by_group
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction applique automatiquement des tests statistiques
+# comparatifs entre groupes pour un ensemble de variables, en fonction
+# des choix de tests fournis par l’utilisateur.
+# Elle gère les cas à 2 groupes et à ≥3 groupes.
+#
+# Arguments :
+# - data : data.frame contenant les données
+# - group : nom de la variable de regroupement
+# - var_groups : liste de groupes de variables
+#       → chaque élément contient un vecteur de variables à tester
+# - tests_choices : liste imbriquée indiquant, pour chaque variable,
+#       le test statistique à appliquer
+#
+# Fonctionnement :
+# - Convertit la variable de groupe en facteur
+# - Détermine le nombre de groupes (k)
+# - Pour chaque groupe de variables :
+#     → applique le test spécifié pour chaque variable
+#
+# - Si k = 2 (comparaison binaire) :
+#     → "ttest"   : test t de Student (variances égales)
+#     → "welch"   : test t de Welch (variances inégales)
+#     → "wilcoxon": test non paramétrique de Wilcoxon
+#
+# - Si k ≥ 3 (comparaison multiple) :
+#     → "anova"   : analyse de variance
+#     → "kruskal" : test de Kruskal-Wallis (non paramétrique)
+#
+# - Génère une erreur si un test non reconnu est spécifié
+#
+# Sortie :
+# - Retourne une liste imbriquée :
+#     * niveau 1 : groupes de variables
+#     * niveau 2 : variables
+#     * contenu  : liste avec :
+#           - test : nom du test utilisé
+#           - p    : p-value associée
+#
+# Dépendances :
+# - stats (t.test, wilcox.test, aov, kruskal.test)
+#
+# Remarques :
+# - Les variables doivent être numériques
+# - La variable de groupe doit contenir au moins 2 modalités
+# - Le choix du test doit être cohérent avec les hypothèses
+#   (normalité, homogénéité des variances)
+# - Cette fonction suppose que les tests appropriés ont été
+#   préalablement déterminés (ex : via normality_report et
+#   homogeneity_report)
+# ------------------------------------------------------------------
+apply_tests_by_group <- function(data, group, var_groups, tests_choices) {
+  
+  g <- as.factor(data[[group]])
+  k <- length(levels(g))
+  
+  out <- list()
+  
+  for (grp in names(var_groups)) {
+    
+    vars <- var_groups[[grp]]
+    test_choices_grp <- tests_choices[[grp]]
+    
+    res <- lapply(vars, function(v) {
+      
+      x <- data[[v]]
+      test_type <- tolower(test_choices_grp[[v]])
+      
+      ## ---- Cas 2 groupes ---- ##
+      if (k == 2) {
+        
+        if (test_type == "wilcoxon") {
+          test <- wilcox.test(x ~ g)
+          return(list(test = "Wilcoxon", p = test$p.value))
+        }
+        
+        if (test_type == "ttest") {
+          test <- t.test(x ~ g, var.equal = TRUE)
+          return(list(test = "t-test", p = test$p.value))
+        }
+        
+        if (test_type == "welch") {
+          test <- t.test(x ~ g, var.equal = FALSE)
+          return(list(test = "Welch", p = test$p.value))
+        }
+        
+        stop(paste("Test non reconnu pour", v, "dans", grp))
+      }
+      
+      ## ---- Cas ≥ 3 groupes ---- ##
+      if (k >= 3) {
+        
+        if (test_type == "anova") {
+          test <- aov(x ~ g)
+          p <- summary(test)[[1]][["Pr(>F)"]][1]
+          return(list(test = "ANOVA", p = p))
+        }
+        
+        if (test_type == "kruskal") {
+          test <- kruskal.test(x ~ g)
+          return(list(test = "Kruskal", p = test$p.value))
+        }
+        
+        stop(paste("Test non reconnu pour", v, "dans", grp))
+      }
+      
+    })
+    
+    names(res) <- vars
+    out[[grp]] <- res
+  }
+  
+  return(out)
+}
+
+
+```
+
+
+```{r}
+##########################################################################################################################################
+# Fonction (7)
+# ------------------------------------------------------------------
+# Fonction : stat_quant_full
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction calcule un ensemble de statistiques descriptives
+# pour une variable numérique et les formate sous forme de texte
+# prêt à être utilisé dans des tableaux de reporting.
+#
+# Arguments :
+# - x : vecteur numérique
+# - stats : vecteur de statistiques à calculer parmi :
+#     * "median_iqr" : médiane et intervalle interquartile (Q1–Q3)
+#     * "min_max"    : minimum et maximum
+#     * "mean_sd"    : moyenne et écart-type
+#     * "na"         : nombre et pourcentage de valeurs manquantes
+#
+# Fonctionnement :
+# - Calcule le nombre et le pourcentage de NA (si demandé)
+# - Exclut les NA pour les autres statistiques
+# - Si toutes les valeurs sont NA :
+#     → retourne des chaînes vides pour les statistiques demandées
+# - Calcule et formate les statistiques sélectionnées :
+#     → médiane (Q1–Q3)
+#     → min–max
+#     → moyenne (SD)
+#
+# Sortie :
+# - Retourne une liste nommée contenant les statistiques demandées
+#   sous forme de chaînes de caractères formatées
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Les résultats sont arrondis à 1 décimale
+# - Le format est adapté à des tableaux (publication/reporting)
+# - Utile pour automatiser la création de tableaux descriptifs
+# ------------------------------------------------------------------
+stat_quant_full <- function(x, stats = c("median_iqr", "min_max", "mean_sd", "na")) {
+  res <- list()
+  
+  # Nombre de NA
+  n_na <- sum(is.na(x))
+  if ("na" %in% stats) {
+    res[["NA"]] <- paste0(n_na, " (", round(100 * n_na / length(x), 1), "%)")
+  }
+  
+  # Exclure NA pour les autres calculs
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    # Si tout NA, renvoyer vide pour les autres stats
+    for (s in setdiff(stats, "na")) res[[s]] <- ""
+    return(res)
+  }
+  
+  if ("median_iqr" %in% stats) {
+    res[["Median (IQR)"]] <- sprintf("%.1f (%.1f–%.1f)",
+                                      median(x),
+                                      quantile(x, 0.25),
+                                      quantile(x, 0.75))
+  }
+  if ("min_max" %in% stats) {
+    res[["Min–Max"]] <- sprintf("%.1f–%.1f", min(x), max(x))
+  }
+  if ("mean_sd" %in% stats) {
+    res[["Mean (SD)"]] <- sprintf("%.1f (%.1f)", mean(x), sd(x))
+  }
+  
+  return(res)
+}
+
+
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (9)
+# ------------------------------------------------------------------
+# Fonction : calc_expected
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction calcule les effectifs théoriques (attendus) d’un
+# tableau de contingence, utilisés notamment dans le test du Chi².
+#
+# Arguments :
+# - tbl : tableau de contingence (matrix ou table)
+#
+# Fonctionnement :
+# - Convertit le tableau en matrice
+# - Calcule :
+#     → les totaux par ligne
+#     → les totaux par colonne
+#     → le total global
+# - Applique la formule des effectifs attendus :
+#     → (total ligne × total colonne) / total général
+# - Utilise la fonction outer() pour calculer la matrice complète
+#
+# Sortie :
+# - Retourne une matrice des effectifs attendus
+#   avec les mêmes dimensions et noms que le tableau initial
+#
+# Dépendances :
+# - base R uniquement
+#
+# Remarques :
+# - Utilisé principalement pour vérifier les conditions du test du Chi²
+# - Les effectifs attendus doivent généralement être ≥ 5 pour la validité
+#   du test du Chi²
+# ------------------------------------------------------------------
+calc_expected <- function(tbl) {
+  tbl <- as.matrix(tbl)
+  row_sums <- rowSums(tbl)
+  col_sums <- colSums(tbl)
+  total <- sum(tbl)
+  expected <- outer(row_sums, col_sums) / total
+  dimnames(expected) <- dimnames(tbl)
+  return(expected)
+}
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (10)
+# ------------------------------------------------------------------
+# Fonction : choose_independence_test
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction sélectionne automatiquement le test statistique
+# d’indépendance approprié pour un tableau de contingence, en fonction
+# des effectifs théoriques.
+#
+# Arguments :
+# - tbl : tableau de contingence (matrix ou table)
+#
+# Fonctionnement :
+# - Calcule les effectifs théoriques via calc_expected()
+# - Calcule la proportion de cellules avec un effectif attendu ≥ 5
+# - Si ≥ 80 % des cellules ont un effectif attendu ≥ 5 :
+#     → utilise le test du Chi² sans correction de continuité
+# - Sinon :
+#     → utilise le test exact de Fisher
+#
+# Sortie :
+# - Retourne une liste contenant :
+#     * test : nom du test choisi ("Chi²" ou "Fisher")
+#     * p    : p-value associée
+#
+# Dépendances :
+# - base R (chisq.test, fisher.test)
+# - calc_expected (fonction interne pour calcul des effectifs attendus)
+#
+# Remarques :
+# - La règle 80 % des effectifs ≥ 5 est une pratique courante
+#   pour la validité du test du Chi²
+# - Utile pour automatiser le choix du test d’indépendance dans
+#   les analyses de variables catégorielles
+# ------------------------------------------------------------------
+choose_independence_test <- function(tbl) {
+  expected <- calc_expected(tbl)
+  prop_ge5 <- mean(expected >= 5)
+  
+  if (prop_ge5 >= 0.8) {
+    test_name <- "Chi²"
+    pval <- chisq.test(tbl, correct = FALSE)$p.value
+  } else {
+    test_name <- "Fisher"
+    pval <- fisher.test(tbl)$p.value
+  }
+  
+  return(list(test = test_name, p = pval))
+}
+
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (13)
+# ------------------------------------------------------------------
+# Fonction : plot_box_points
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction génère des boxplots pour un ou plusieurs variables
+# numériques, avec affichage des points individuels et mise en évidence
+# des observations extrêmes selon des seuils personnalisés. Elle peut
+# gérer des groupes, ajouter des informations complémentaires, et
+# exporter les graphiques.
+#
+# Arguments :
+# - df : data.frame contenant les données
+# - x_var : variable de regroupement (optionnel), pour créer des boxplots par groupe
+# - y_vars : vecteur des variables numériques à représenter
+# - thresholds : liste nommée des seuils pour identifier les valeurs extrêmes
+#                (seuil inférieur et supérieur par variable)
+# - labels_list : liste nommée pour renommer les axes y
+# - y_ranges : liste de limites y personnalisées par variable
+# - group_colors : couleurs pour les boxplots des groupes
+# - point_color : couleur des points normaux
+# - extreme_color : couleur des points extrêmes
+# - add_var : variable supplémentaire à inclure dans le tableau des extrêmes
+# - ncol, nrow : organisation des graphiques combinés (layout)
+# - save_path : chemin pour sauvegarder le graphique final
+#
+# Fonctionnement :
+# - Vérifie que les variables y_vars, x_var et add_var existent
+# - Pour chaque variable y :
+#     → identifie les observations extrêmes selon les seuils
+#     → crée un boxplot avec :
+#         * boxplot standard (sans outliers visibles)
+#         * points individuels (colorés selon extrême ou non)
+#         * numérotation des observations
+#     → applique les limites y si fournies
+#     → stocke les observations extrêmes dans une liste avec x_var et add_var si fournis
+# - Combine les graphiques avec patchwork selon ncol/nrow
+# - Sauvegarde le graphique si save_path est fourni
+#
+# Sortie :
+# - Liste contenant :
+#     * plot : objet patchwork combinant tous les boxplots
+#     * extremes : liste de data.frames des observations extrêmes pour chaque variable
+#
+# Dépendances :
+# - dplyr, ggplot2, rlang, patchwork
+#
+# Remarques :
+# - Permet de visualiser rapidement les outliers tout en conservant
+#   les données complètes pour reporting
+# - Utile pour le diagnostic des variables numériques avant analyse
+# - Les numéros d’observation facilitent la localisation des valeurs extrêmes
+# ------------------------------------------------------------------
+plot_box_points <- function(
+  df,
+  x_var = NULL,
+  y_vars,
+  thresholds = NULL,        # seuils pour extrêmes
+  labels_list = NULL,
+  y_ranges = NULL,          # plages Y personnalisées
+  group_colors = c("lightblue", "lightpink"),
+  point_color = "darkred",
+  extreme_color = "red",
+  add_var = NULL,           # nouvelle variable à ajouter dans le tableau des extrêmes
+  ncol = NULL,
+  nrow = NULL,
+  save_path = NULL
+) {
+
+  # Vérifications
+  y_vars <- y_vars[y_vars %in% names(df)]
+  if (length(y_vars) == 0) stop("Aucune variable de y_vars n'existe dans df")
+  if (!is.null(x_var) && !(x_var %in% names(df))) stop("x_var doit exister dans df ou être NULL")
+  if (!is.null(thresholds)) thresholds <- thresholds[names(thresholds) %in% y_vars]
+  if (!is.null(y_ranges)) y_ranges <- y_ranges[names(y_ranges) %in% y_vars]
+  if (!is.null(add_var) && !(add_var %in% names(df))) stop("add_var doit exister dans df ou être NULL")
+
+  plot_list <- list()
+  extreme_list <- list()  # pour stocker les extrêmes avec la variable add_var
+
+  for (y_var in y_vars) {
+
+    seuil <- if (!is.null(thresholds) && y_var %in% names(thresholds)) thresholds[[y_var]] else NULL
+    ylim_var <- if (!is.null(y_ranges) && y_var %in% names(y_ranges)) y_ranges[[y_var]] else NULL
+
+    df_temp <- df %>%
+      dplyr::mutate(
+        obs_num = dplyr::row_number(),
+        extreme = if (!is.null(seuil)) !!rlang::sym(y_var) < seuil[1] | !!rlang::sym(y_var) > seuil[2] else FALSE
+      )
+
+    y_label <- if (!is.null(labels_list) && y_var %in% names(labels_list)) labels_list[[y_var]] else y_var
+
+    # CAS 1 : SANS GROUPE
+    if (is.null(x_var)) {
+      p <- ggplot2::ggplot(df_temp, ggplot2::aes(x = 1, y = !!rlang::sym(y_var))) +
+        ggplot2::geom_boxplot(fill = group_colors[1], width = 0.3, outlier.shape = NA) +
+        ggplot2::geom_jitter(ggplot2::aes(color = extreme), width = 0.08, size = 2) +
+        ggplot2::geom_text(ggplot2::aes(label = obs_num), hjust = -0.2, size = 3, check_overlap = TRUE) +
+        ggplot2::scale_color_manual(values = c("FALSE" = point_color, "TRUE" = extreme_color)) +
+        ggplot2::scale_x_continuous(breaks = NULL) +
+        ggplot2::labs(x = NULL, y = y_label) +
+        ggplot2::theme_minimal()
+
+    # CAS 2 : AVEC GROUPE
+    } else {
+      p <- ggplot2::ggplot(df_temp, ggplot2::aes(x = .data[[x_var]], y = .data[[y_var]])) +
+        ggplot2::geom_boxplot(ggplot2::aes(fill = .data[[x_var]]), width = 0.6, outlier.shape = NA) +
+        ggplot2::scale_fill_manual(values = group_colors) +
+        ggplot2::geom_jitter(ggplot2::aes(color = extreme), width = 0.2, size = 2, show.legend = FALSE) +
+        ggplot2::geom_text(ggplot2::aes(label = obs_num), hjust = -0.2, vjust = -0.5, size = 3, check_overlap = TRUE) +
+        ggplot2::scale_color_manual(values = c("FALSE" = point_color, "TRUE" = extreme_color)) +
+        ggplot2::labs(x = x_var, y = y_label) +
+        ggplot2::theme_minimal()
+    }
+
+    # Application des limites Y
+    if (!is.null(ylim_var) && length(ylim_var) == 2) {
+      p <- p + ggplot2::coord_cartesian(ylim = ylim_var)
+    }
+
+    plot_list[[y_var]] <- p
+
+    # Stockage des extrêmes dans un tableau
+    if (!is.null(seuil)) {
+      cols <- c("obs_num", y_var)
+      if (!is.null(x_var)) cols <- c(cols, x_var)
+      if (!is.null(add_var)) cols <- c(cols, add_var)
+
+      extreme_values <- df_temp %>% dplyr::filter(extreme) %>% dplyr::select(all_of(cols))
+      extreme_list[[y_var]] <- extreme_values
+
+      cat("\n-----------------------------\n")
+      cat("VARIABLE :", y_var, "\n")
+      cat("Seuils :", seuil, "\n")
+      cat("Observations extrêmes :\n")
+      print(extreme_values)
+    }
+  }
+
+  combined_plot <- patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow)
+
+  if (!is.null(save_path)) {
+    ggplot2::ggsave(
+      save_path,
+      combined_plot,
+      width = 4 * (ncol %||% 2),
+      height = 4 * (nrow %||% ceiling(length(y_vars) / 2))
+    )
+    cat("Graphique enregistré :", save_path, "\n")
+  }
+
+  return(list(
+    plot = combined_plot,
+    extremes = extreme_list  # dataframe des valeurs extrêmes avec add_var si fourni
+  ))
+}
+
+
+```
+
+
+```{r}
+# ------------------------------------------------------------
+# Fonction : plot_scatter_pairs
+# ------------------------------------------------------------
+# Description :
+# Cette fonction génère des graphiques de type scatter plot pour
+# toutes les paires possibles de variables quantitatives d’un
+# data.frame. Elle affiche les points, une courbe de tendance
+# (linéaire ou LOESS) et les coefficients de corrélation avec
+# leur p-value.
+#
+# Arguments :
+# - df          : data.frame contenant les variables à analyser
+# - vars        : vecteur de noms de variables quantitatives
+# - point_color : couleur des points (par défaut "darkred")
+# - line_color  : couleur de la ligne de tendance (par défaut "blue")
+# - smooth      : type de lissage, "linear" (régression linéaire) 
+#                 ou "loess" (par défaut "linear")
+# - test        : type de test de corrélation, "pearson" ou "spearman"
+# - labels_list : liste nommée associant chaque variable à un label 
+#                 plus lisible (optionnel)
+# - nrow        : nombre de lignes dans la disposition des graphiques
+# - ncol        : nombre de colonnes dans la disposition des graphiques
+# - file_path   : chemin du fichier pour sauvegarder les plots 
+#                 (.png ou .pdf). Si NULL, ouvre un device graphique.
+#
+# Valeur retournée :
+# Aucun objet retourné. Les graphiques sont affichés ou sauvegardés
+# selon file_path.
+#
+# Détails :
+# - Affiche pour chaque paire de variables :
+#     - Scatter plot
+#     - Ligne de tendance (linear ou loess)
+#     - Coefficient de corrélation et p-value
+# - Si labels_list est fourni, les labels sont utilisés dans les titres
+# - Gère automatiquement le nombre de lignes et colonnes pour la disposition
+# - Supporte la sauvegarde des graphiques en PNG ou PDF
+# - Les valeurs manquantes sont ignorées dans le calcul de corrélation
+#
+# Exemples :
+# plot_scatter_pairs(df, vars = c("var1","var2","var3"))
+# plot_scatter_pairs(df, vars = c("var1","var2"), smooth = "loess", test = "spearman")
+# plot_scatter_pairs(df, vars = c("var1","var2"), file_path = "scatter_pairs.pdf")
+#
+# Auteur : [D. KOUADIO]
+# ------------------------------------------------------------
+plot_scatter_pairs <- function(df, vars, 
+                               point_color = "darkred",
+                               line_color = "blue",
+                               smooth = c("linear", "loess"),
+                               test = c("pearson", "spearman"),
+                               labels_list = NULL,  # dictionnaire variable -> label
+                               nrow = NULL, ncol = NULL,
+                               file_path = NULL) {
+  
+  smooth <- match.arg(smooth)
+  test   <- match.arg(test)
+  
+  if (length(vars) < 2) stop("Il faut au moins deux variables quantitatives.")
+  
+  df <- df %>% dplyr::select(all_of(vars))
+  
+  pairs <- t(combn(vars, 2))
+  
+  # Créer le dictionnaire de labels
+  if (!is.null(labels_list)) {
+    label_map <- labels_list
+  } else {
+    label_map <- setNames(vars, vars)
+  }
+  
+  if (is.null(ncol)) ncol <- 2
+  if (is.null(nrow)) nrow <- ceiling(nrow(pairs) / ncol)
+  
+  # Si file_path fourni, ouvrir device graphique
+  if (!is.null(file_path)) {
+    ext <- tools::file_ext(file_path)
+    if (tolower(ext) == "png") {
+      png(filename = file_path, width = 1200, height = 800, res = 150)
+    } else if (tolower(ext) == "pdf") {
+      pdf(file = file_path, width = 6 * ncol, height = 5 * nrow)
+    } else {
+      stop("Extension non supportée. Utiliser .png ou .pdf")
+    }
+  } else {
+    dev.new(width = 6 * ncol, height = 5 * nrow)
+  }
+  
+  par(mfrow = c(nrow, ncol))
+  
+  for (i in 1:nrow(pairs)) {
+    x_var <- pairs[i, 1]
+    y_var <- pairs[i, 2]
+    
+    # ---- correlation test ----
+    test_result <- suppressWarnings(
+      cor.test(df[[x_var]], df[[y_var]], method = test)
+    )
+    pval <- signif(test_result$p.value, 3)
+    corr <- round(test_result$estimate, 3)
+    
+    # ---- Récupérer les labels ----
+    x_label <- ifelse(x_var %in% names(label_map), label_map[x_var], x_var)
+    y_label <- ifelse(y_var %in% names(label_map), label_map[y_var], y_var)
+    
+    p <- ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+      geom_point(color = point_color, alpha = 0.6) +
+      {
+        if (smooth == "linear") geom_smooth(method = "lm", color = line_color)
+        else geom_smooth(method = "loess", color = line_color)
+      } +
+      labs(
+        title = paste(""),
+        x = x_label, y = y_label
+      ) +
+      theme_minimal() +
+      annotate(
+        "text", x = Inf, y = Inf, hjust = 1.1, vjust = 1.5,
+        label = paste0("corr coef = ", round(corr,2), "\np = ", round(pval,2)),
+        size = 4, color = "black"
+      )
+    
+    print(p)
+  }
+  
+  par(mfrow = c(1,1))
+  
+  # Fermer le device si sauvegarde
+  if (!is.null(file_path)) dev.off()
+}
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (20)
+# ------------------------------------------------------------
+# Fonction : plot_corr_group_to_targets
+# ------------------------------------------------------------
+# Description :
+# Cette fonction génère des scatter plots pour toutes les paires
+# composées d'une variable cible et d'un ou plusieurs groupes de
+# variables. Chaque graphique affiche les points, une ligne de
+# tendance (linéaire ou LOESS) et le coefficient de corrélation
+# avec sa p-value.
+#
+# Arguments :
+# - df          : data.frame contenant les variables à analyser
+# - group_vars  : vecteur de noms de variables explicatives
+# - target_vars : vecteur de noms de variables cibles
+# - point_color : couleur des points (par défaut "darkred")
+# - line_color  : couleur de la ligne de tendance (par défaut "blue")
+# - smooth      : type de lissage, "linear" (régression linéaire) 
+#                 ou "loess" (par défaut "linear")
+# - test        : type de test de corrélation, "pearson" ou "spearman"
+# - labels_list : liste nommée associant chaque variable à un label
+#                 plus lisible (optionnel)
+# - ncol        : nombre de colonnes dans la disposition des plots pour
+#                 la sauvegarde paginée
+# - nrow        : nombre de lignes dans la disposition des plots pour
+#                 la sauvegarde paginée
+# - file_path   : chemin du dossier pour sauvegarder les plots. Si NULL,
+#                 les plots ne sont pas sauvegardés
+# - width       : largeur d’un plot (en pouces) lors de la sauvegarde
+# - height      : hauteur d’un plot (en pouces) lors de la sauvegarde
+# - dpi         : résolution (points par pouce) lors de la sauvegarde
+#
+# Valeur retournée :
+# Une liste de plots ggplot2, chaque élément correspondant à une paire
+# (variable cible x variable de groupe)
+#
+# Détails :
+# - Pour chaque paire, la fonction effectue un test de corrélation
+#   (Pearson ou Spearman) et affiche la p-value dans le sous-titre.
+# - Si labels_list est fourni, les labels sont utilisés pour les axes.
+# - Si file_path est fourni, les plots sont sauvegardés en pages
+#   paginées, chaque page contenant nrow x ncol plots.
+# - Gère automatiquement la création du dossier si nécessaire.
+# - Les valeurs manquantes sont ignorées dans le calcul de corrélation.
+#
+# Exemples :
+# plots <- plot_corr_group_to_targets(df, group_vars = c("var1","var2"),
+#                                    target_vars = c("target1","target2"))
+# plots <- plot_corr_group_to_targets(df, group_vars = c("var1"),
+#                                    target_vars = c("target1"),
+#                                    smooth = "loess", test = "spearman",
+#                                    file_path = "plots_output")
+#
+# Auteur : [D. KOUADIO]
+# ------------------------------------------------------------
+##########################################################################################################################
+# Fonction pour étudier la corrélation ou le lien monotone entre un groupe de variables quantitatives et avec d'autres variables cibles
+#/ Commme la fonction (19) sauf que, cette fois, c'est le lien entre des variables quantitatives et certaines autres variables fixées (et non deux à deux).
+plot_corr_group_to_targets <- function(df,
+                                       group_vars,
+                                       target_vars,
+                                       point_color = "darkred",
+                                       line_color = "blue",
+                                       smooth = c("linear", "loess"),
+                                       test = c("pearson", "spearman"),
+                                       labels_list = NULL,
+                                       ncol = 2,
+                                       nrow = 2,
+                                       file_path = NULL,
+                                       width = 8,
+                                       height = 6,
+                                       dpi = 300) {
+
+  smooth <- match.arg(smooth)
+  test   <- match.arg(test)
+
+  # Dictionnaire de labels
+  if (!is.null(labels_list)) {
+    label_map <- labels_list
+  } else {
+    label_map <- setNames(c(group_vars, target_vars),
+                          c(group_vars, target_vars))
+  }
+
+  all_plots <- list()
+
+  # Génération de tous les plots
+  for (target_var in target_vars) {
+
+    df_sub <- df[, c(group_vars, target_var), drop = FALSE]
+
+    for (var in group_vars) {
+
+      test_result <- suppressWarnings(
+        cor.test(df_sub[[var]], df_sub[[target_var]], method = test)
+      )
+
+      pval <- signif(test_result$p.value, 2)
+      corr <- round(test_result$estimate, 3)
+
+      p <- ggplot(df_sub, aes(x = .data[[var]], y = .data[[target_var]])) +
+        geom_point(color = point_color, alpha = 0.6) +
+        {
+          if (smooth == "linear")
+            geom_smooth(method = "lm", color = line_color)
+          else
+            geom_smooth(method = "loess", color = line_color)
+        } +
+        labs(
+          x = label_map[[var]],
+          y = label_map[[target_var]],
+          subtitle = paste0("p = ", pval)
+        ) +
+        theme_minimal()
+
+      all_plots[[paste(target_var, var, sep = "__")]] <- p
+    }
+  }
+
+  # -----------------------------
+  # Sauvegarde paginée si demandée
+  # -----------------------------
+  if (!is.null(file_path)) {
+
+    if (!dir.exists(file_path)) {
+      dir.create(file_path, recursive = TRUE)
+    }
+
+    plots_per_page <- ncol * nrow
+    n_pages <- ceiling(length(all_plots) / plots_per_page)
+
+    plot_names <- names(all_plots)
+
+    for (i in seq_len(n_pages)) {
+
+      idx <- ((i - 1) * plots_per_page + 1):
+             min(i * plots_per_page, length(all_plots))
+
+      p_page <- cowplot::plot_grid(
+        plotlist = all_plots[idx],
+        ncol = ncol,
+        nrow = nrow
+      )
+
+      ggsave(
+        filename = file.path(file_path, paste0("correlation_page_", i, ".png")),
+        plot = p_page,
+        width = width * ncol,
+        height = height * nrow,
+        dpi = dpi
+      )
+    }
+  }
+
+  return(all_plots)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_corr_group_to_targets2
+# ------------------------------------------------------------------
+# Description :
+# Version améliorée de plot_corr_group_to_targets. Génère des scatter plots
+# pour toutes les paires (variable cible × variable explicative) avec une
+# mise en forme publication (theme_minimal, linewidth, se = FALSE).
+#
+# Arguments :
+# - df          : data.frame contenant les variables
+# - group_vars  : vecteur de variables explicatives (axe X)
+# - target_vars : vecteur de variables cibles (axe Y)
+# - point_color : couleur des points (défaut "darkred")
+# - line_color  : couleur de la ligne de tendance (défaut "blue")
+# - smooth      : type de lissage — "linear" ou "loess" (défaut "linear")
+# - test        : méthode de corrélation — "pearson" ou "spearman"
+# - labels_list : liste nommée variable → label lisible (optionnel)
+# - ncol        : colonnes par page lors de la sauvegarde paginée
+# - nrow        : lignes par page lors de la sauvegarde paginée
+# - file_path   : chemin d'un dossier de sauvegarde des PNG. Si NULL, pas de sauvegarde.
+# - width       : largeur d'un plot (pouces) lors de la sauvegarde
+# - height      : hauteur d'un plot (pouces) lors de la sauvegarde
+# - dpi         : résolution lors de la sauvegarde (défaut 300)
+#
+# Valeur retournée :
+# - Liste de plots ggplot2 nommés "target__group".
+#
+# Différences par rapport à plot_corr_group_to_targets :
+# - se = FALSE (pas de bande de confiance)
+# - linewidth = 1 (remplace size pour ggplot2 ≥ 3.4)
+# - theme_minimal avec base_size = 12 et grille mineure supprimée
+#
+# Dépendances :
+# - ggplot2, cowplot (pour la sauvegarde paginée)
+# ------------------------------------------------------------------
+plot_corr_group_to_targets2 <- function(df,
+                                       group_vars,
+                                       target_vars,
+                                       point_color = "darkred",
+                                       line_color = "blue",
+                                       smooth = c("linear", "loess"),
+                                       test = c("pearson", "spearman"),
+                                       labels_list = NULL,
+                                       ncol = 2,
+                                       nrow = 2,
+                                       file_path = NULL,
+                                       width = 8,
+                                       height = 6,
+                                       dpi = 300) {
+
+  smooth <- match.arg(smooth)
+  test   <- match.arg(test)
+
+  # Dictionnaire de labels
+  if (!is.null(labels_list)) {
+    label_map <- labels_list
+  } else {
+    label_map <- setNames(c(group_vars, target_vars),
+                          c(group_vars, target_vars))
+  }
+
+  all_plots <- list()
+
+  for (target_var in target_vars) {
+
+    df_sub <- df[, c(group_vars, target_var), drop = FALSE]
+
+    for (var in group_vars) {
+
+      test_result <- suppressWarnings(
+        cor.test(df_sub[[var]], df_sub[[target_var]], method = test)
+      )
+
+      pval <- signif(test_result$p.value, 2)
+      corr <- round(test_result$estimate, 3)
+
+      p <- ggplot(df_sub, aes(x = .data[[var]], y = .data[[target_var]])) +
+        geom_point(color = point_color, alpha = 0.7, size = 2) +
+        {
+          if (smooth == "linear")
+            geom_smooth(method = "lm", color = line_color, se = FALSE, linewidth = 1)
+          else
+            geom_smooth(method = "loess", color = line_color, se = FALSE, linewidth = 1)
+        } +
+        labs(
+          x = label_map[[var]],
+          y = label_map[[target_var]],
+          subtitle = paste0("p = ", pval)
+        ) +
+        theme_minimal(base_size = 12) +
+        theme(
+          plot.subtitle = element_text(size = 11),
+          axis.title = element_text(size = 12),
+          axis.text = element_text(size = 10),
+          panel.grid.minor = element_blank()
+        )
+
+      all_plots[[paste(target_var, var, sep = "__")]] <- p
+    }
+  }
+
+  # -----------------------------
+  # Sauvegarde paginée si demandée
+  # -----------------------------
+  if (!is.null(file_path)) {
+
+    if (!dir.exists(file_path)) {
+      dir.create(file_path, recursive = TRUE)
+    }
+
+    plots_per_page <- ncol * nrow
+    n_pages <- ceiling(length(all_plots) / plots_per_page)
+
+    for (i in seq_len(n_pages)) {
+
+      idx <- ((i - 1) * plots_per_page + 1):
+             min(i * plots_per_page, length(all_plots))
+
+      p_page <- cowplot::plot_grid(
+        plotlist = all_plots[idx],
+        ncol = ncol,
+        nrow = nrow
+      )
+
+      ggsave(
+        filename = file.path(file_path, paste0("correlation_page_", i, ".png")),
+        plot = p_page,
+        width = width * ncol,
+        height = height * nrow,
+        dpi = dpi,
+        device = "png",
+        bg = "white"
+      )
+    }
+  }
+
+  return(all_plots)
+}
+```
+
+
+```{r}
+##########################################################################################################################
+# Fonction (21)
+# ------------------------------------------------------------------
+# Fonction : correlation_table
+# ------------------------------------------------------------------
+# Description :
+# Cette fonction calcule les corrélations entre toutes les paires
+# de variables numériques d’un data.frame et génère un tableau
+# interactif avec la valeur du coefficient et la p-value.
+#
+# Arguments :
+# - df : data.frame contenant les variables
+# - vars : vecteur des variables numériques à analyser
+# - method : méthode de corrélation, "pearson" (par défaut) ou "spearman"
+#
+# Fonctionnement :
+# - Sélectionne uniquement les variables spécifiées
+# - Vérifie que toutes les variables sont numériques
+# - Crée toutes les combinaisons deux à deux des variables
+# - Pour chaque couple, calcule :
+#     → coefficient de corrélation
+#     → p-value du test de corrélation
+# - Construit un tableau interactif avec gt() :
+#     → formatage numérique à 4 décimales
+#     → coloration des coefficients : rouge (corr négative), blanc (0), bleu (corr positive)
+#     → titre et sous-titre indiquant la méthode et les variables
+#
+# Sortie :
+# - Objet gt affichant la table des corrélations avec p-values et coloration
+#
+# Dépendances :
+# - dplyr, gt, scales, stats (cor.test)
+#
+# Remarques :
+# - Utile pour analyser rapidement les relations linéaires ou monotones
+#   entre variables quantitatives
+# - Les coefficients et p-values sont arrondis pour lisibilité
+# ------------------------------------------------------------------
+correlation_table <- function(df, vars, method = c("pearson", "spearman")) {
+  
+  method <- match.arg(method)
+  
+  # Vérification
+  df <- df %>% dplyr::select(all_of(vars))
+  
+  if (!all(sapply(df, is.numeric))) {
+    stop("Toutes les variables doivent être numériques.")
+  }
+  # Combinaisons deux à deux
+  pairs <- t(combn(vars, 2))
+  
+  res <- data.frame(
+    Variable_1 = pairs[,1],
+    Variable_2 = pairs[,2],
+    Coefficient = NA,
+    p_value = NA
+  )
+  
+  # Boucle sur les couples
+  for (i in 1:nrow(res)) {
+    x <- df[[res$Variable_1[i]]]
+    y <- df[[res$Variable_2[i]]]
+    
+    test <- cor.test(x, y, method = method)
+    
+    res$Coefficient[i] <- round(test$estimate, 4)
+    res$p_value[i] <- test$p.value
+  }
+  
+  # Tableau GT
+  res %>%
+    gt() %>%
+    fmt_number(columns = c("Coefficient"), decimals = 4) %>%
+    fmt_number(columns = c("p_value"), decimals = 4) %>%
+    tab_header(
+      title = paste("Corrélations (méthode :", method, ")"),
+      subtitle = "Variables mises en relation deux à deux"
+    ) %>%
+    data_color(
+      columns = "Coefficient",
+      colors = scales::col_numeric(
+        palette = c("red", "white", "blue"),
+        domain = c(-1, 1)
+      )
+    )
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction (22) : stat_quant
+# ------------------------------------------------------------------
+# Description :
+# Calcule un résumé statistique compact pour une variable quantitative :
+# médiane et intervalle interquartile [Q1 ; Q3], formatés pour affichage.
+#
+# Arguments :
+# - x : vecteur numérique
+#
+# Sortie :
+# - Chaîne de caractères au format "médiane (Q1–Q3)"
+#   Retourne "" si toutes les valeurs sont manquantes.
+#
+# Exemple :
+# stat_quant(c(10, 20, 30, 40, 50))  →  "30 (17.5–42.5)"
+# ------------------------------------------------------------------
+stat_quant <- function(x){
+  if(all(is.na(x))) return("")
+  med <- round(median(x, na.rm = TRUE), 1)
+  q1  <- round(quantile(x, 0.25, na.rm = TRUE), 1)
+  q3  <- round(quantile(x, 0.75, na.rm = TRUE), 1)
+  paste0(med, " (", q1, "–", q3, ")")
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction (23) : stat_qual
+# ------------------------------------------------------------------
+# Description :
+# Calcule les effectifs et pourcentages pour chaque modalité d'une variable
+# qualitative. Les valeurs manquantes sont exclues du calcul.
+#
+# Arguments :
+# - x : vecteur (factor ou character)
+#
+# Sortie :
+# - Vecteur nommé au format "n (xx.x%)" pour chaque modalité
+#
+# Exemple :
+# stat_qual(c("Oui","Non","Oui","Oui"))
+# →  Non          Oui
+#    "1 (25%)"    "3 (75%)"
+# ------------------------------------------------------------------
+stat_qual <- function(x){
+  x <- x[!is.na(x)]                          # exclure les NA avant tout
+  if (length(x) == 0) return(character(0))   # vecteur vide ou tout NA → retour propre
+  tab <- table(x, useNA = "no")
+  pct <- round(prop.table(tab) * 100, 1)
+  out <- paste0(tab, " (", pct, "%)")
+  names(out) <- names(tab)
+  return(out)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_evolutive
+# ------------------------------------------------------------------
+# Description :
+# Génère un graphique "spaghetti" pour visualiser l'évolution de variables
+# quantitatives entre plusieurs visites, pour chaque individu.
+# Trace les trajectoires individuelles et, optionnellement, la courbe
+# de la moyenne générale. Supporte le découpage par facettes.
+#
+# Arguments :
+# - data          : data.frame en format large (colonnes de type "visite_variable")
+# - vars          : vecteur de noms de variables (sans le préfixe visite)
+# - labels_vars   : vecteur de labels lisibles pour les variables (défaut = vars)
+# - visites       : vecteur de préfixes de visites (ex. c("v1","v3"))
+# - visites_labels: labels lisibles pour les visites (défaut = visites)
+# - sep           : séparateur entre le préfixe visite et le nom de variable (défaut "_")
+# - id            : nom de la colonne identifiant patient (défaut "ID")
+# - facet         : TRUE pour un graphique par variable (facet_wrap), FALSE pour couleur
+# - nrow_facet    : nombre de lignes pour facet_wrap (optionnel)
+# - ncol_facet    : nombre de colonnes pour facet_wrap (optionnel)
+# - moyenne       : TRUE pour ajouter la courbe de la moyenne (en noir)
+# - output        : chemin du fichier PNG de sortie (défaut "spaghetti.png")
+#
+# Valeur retournée :
+# - Objet ggplot2 (spaghetti plot). Sauvegardé dans output.
+#
+# Dépendances :
+# - ggplot2, reshape2, dplyr
+#
+# Remarques :
+# - Format attendu des colonnes : <visite><sep><variable> (ex. "v1_poids")
+# - Voir plot_evolutive2/3/4 pour des versions avec groupes et statistiques.
+# ------------------------------------------------------------------
+plot_evolutive <- function(data,
+                           vars,
+                           labels_vars = vars,
+                           visites = c("v1","v3"),
+                           visites_labels = visites,
+                           sep = "_",
+                           id = "ID",
+                           facet = TRUE,
+                           nrow_facet = NULL,
+                           ncol_facet = NULL,
+                           moyenne = TRUE,
+                           output = "spaghetti.png") {
+
+  # Vérifications
+  if(length(vars) != length(labels_vars)) {
+    stop("vars et labels_vars doivent avoir la même longueur")
+  }
+  if(length(visites) != length(visites_labels)) {
+    stop("visites et visites_labels doivent avoir la même longueur")
+  }
+
+  # Construction des colonnes
+  cols <- unlist(lapply(vars, function(v) paste0(visites, sep, v)))
+  cols <- cols[cols %in% names(data)]
+
+  df <- data[, c(id, cols), drop = FALSE]
+
+  # Format long
+  df_long <- melt(df, id.vars = id)
+
+  # --- SUPPRESSION DES NA ---
+  df_long <- df_long %>% filter(!is.na(value))
+
+  # Extraction visite
+  df_long$visite <- sapply(strsplit(as.character(df_long$variable), sep), `[`, 1)
+
+  # Extraction robuste du nom de variable
+  df_long$var <- sub("^[^_]+_", "", df_long$variable)
+
+  # Labels variables
+  df_long$var_label <- factor(df_long$var,
+                              levels = vars,
+                              labels = labels_vars)
+
+  # Labels visites
+  df_long$visite <- factor(df_long$visite,
+                           levels = visites,
+                           labels = visites_labels)
+
+  #############################################################
+  # Graphique
+  #############################################################
+
+  p <- ggplot(df_long,
+              aes(x = visite,
+                  y = value,
+                  group = .data[[id]])) +
+
+    geom_line(alpha = 0.4, na.rm = TRUE) +
+    geom_point(size = 1.5, na.rm = TRUE)
+
+  # Moyenne en ignorant NA
+  if (moyenne) {
+    p <- p +
+      stat_summary(aes(group = 1),
+                   fun = mean,
+                   geom = "line",
+                   size = 1.6,
+                   color = "black",
+                   na.rm = TRUE) +
+
+      stat_summary(aes(group = 1),
+                   fun = mean,
+                   geom = "point",
+                   size = 3,
+                   color = "black",
+                   na.rm = TRUE)
+  }
+
+  # Facettes
+  if (facet) {
+    p <- p + facet_wrap(~ var_label,
+                        scales = "free_y",
+                        nrow = nrow_facet,
+                        ncol = ncol_facet)
+  } else {
+    p <- p + aes(color = var_label)
+  }
+
+  p <- p +
+    labs(title = "",
+         x = "Visite",
+         y = "Valeur",
+         color = "Variables") +
+    theme_minimal()
+
+  ggsave(output, p, width = 10, height = 6)
+
+  return(p)
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_evolutive2
+# ------------------------------------------------------------------
+# Description :
+# Version étendue de plot_evolutive avec support de variable de groupe
+# et calcul automatique de statistiques intra- et inter-groupes.
+#
+# Nouveautés par rapport à plot_evolutive :
+# - Argument groupe : variable de groupement pour colorer les trajectoires
+# - Calcul intra-groupe : delta médian, IC95%, test des signes (binom),
+#   test de Wilcoxon apparié
+# - Calcul inter-groupes (si 2 groupes) : test de Wilcoxon non-apparié +
+#   IC95% du delta médian par bootstrap (B=2000)
+#
+# Arguments :
+# - data          : data.frame en format large
+# - vars          : vecteur de variables (sans préfixe visite)
+# - labels_vars   : labels lisibles pour les variables (défaut = vars)
+# - visites       : préfixes de visites (ex. c("v1","v3"))
+# - visites_labels: labels lisibles pour les visites
+# - sep           : séparateur entre préfixe visite et nom variable (défaut "_")
+# - id            : colonne identifiant patient (défaut "ID")
+# - groupe        : nom de la variable de groupe (optionnel)
+# - facet         : TRUE pour facet_wrap par variable
+# - nrow_facet    : lignes pour facet_wrap
+# - ncol_facet    : colonnes pour facet_wrap
+# - moyenne       : TRUE pour tracer la courbe de la moyenne (en noir)
+# - output        : chemin du fichier PNG de sortie
+#
+# Valeur retournée :
+# - Liste avec $plot (ggplot2) et $stats (statistiques par variable)
+#
+# Dépendances :
+# - ggplot2, reshape2, dplyr, cowplot
+# ------------------------------------------------------------------
+plot_evolutive2 <- function(data,
+                           vars,
+                           labels_vars = vars,
+                           visites = c("v1","v3"),
+                           visites_labels = visites,
+                           sep = "_",
+                           id = "ID",
+                           groupe = NULL,
+                           facet = TRUE,
+                           nrow_facet = NULL,
+                           ncol_facet = NULL,
+                           moyenne = TRUE,
+                           output = "spaghetti.png") {
+
+  # Vérifications
+  if(length(vars) != length(labels_vars))
+    stop("vars et labels_vars doivent avoir la même longueur")
+  if(length(visites) != length(visites_labels))
+    stop("visites et visites_labels doivent avoir la même longueur")
+
+  # Construction des colonnes
+  cols <- unlist(lapply(vars, function(v) paste0(visites, sep, v)))
+  cols <- cols[cols %in% names(data)]
+  keep <- c(id, if(!is.null(groupe)) groupe, cols)
+  df <- data[, keep, drop = FALSE]
+
+  # Forcer toutes les colonnes de mesures en numérique
+  for(col in cols){
+    df[[col]] <- as.numeric(as.character(df[[col]]))
+  }
+
+  # Créer colonne temporaire groupe pour ggplot et stats
+  if(!is.null(groupe)) df$groupe_tmp <- df[[groupe]]
+
+  # Passage au format long
+  df_long <- melt(df, id.vars = c(id, if(!is.null(groupe)) "groupe_tmp"))
+  df_long <- df_long %>% filter(!is.na(value))
+  df_long$visite <- sapply(strsplit(as.character(df_long$variable), sep), `[`, 1)
+  df_long$var <- sub("^[^_]+_", "", df_long$variable)
+  df_long$var_label <- factor(df_long$var,
+                              levels = vars,
+                              labels = labels_vars)
+  df_long$visite <- factor(df_long$visite,
+                           levels = visites,
+                           labels = visites_labels)
+
+  # Colonne temporaire pour ggplot
+  df_long$ID_tmp <- df_long[[id]]
+
+  #=======================================================================
+  # Statistiques
+  #=======================================================================
+  analyse_variable <- function(v){
+    tmp <- df_long %>% filter(var == v)
+    wide <- tmp %>% dcast(as.formula(paste(id,"~ visite")), value.var = "value")
+    colnames(wide)[2:3] <- c("v1","v3")
+
+    # Forcer en numérique (sécurise)
+    wide$v1 <- as.numeric(as.character(wide$v1))
+    wide$v3 <- as.numeric(as.character(wide$v3))
+    wide$delta <- wide$v3 - wide$v1
+
+    res <- list()
+
+    if(!is.null(groupe)){
+      wide$groupe_tmp <- df[[groupe]][match(wide[[id]], df[[id]])]
+
+      # Intra-groupe
+      res$intra <- wide %>%
+        group_by(groupe_tmp) %>%
+        summarise(
+          n = n(),
+          up   = sum(delta > 0, na.rm=TRUE),
+          down = sum(delta < 0, na.rm=TRUE),
+          same = sum(delta == 0, na.rm=TRUE),
+          p_binom = ifelse(up+down>0, binom.test(up, up+down)$p.value, NA),
+          p_paired = ifelse(sum(!is.na(delta))>3, wilcox.test(v3, v1, paired=TRUE)$p.value, NA),
+          delta_med = median(delta, na.rm=TRUE),
+          IC_low  = quantile(delta, 0.025, na.rm=TRUE),
+          IC_high = quantile(delta, 0.975, na.rm=TRUE)
+        )
+
+      # Inter-groupes si exactement 2 groupes
+      if(length(unique(wide$groupe_tmp))==2){
+        p_inter <- wilcox.test(delta ~ groupe_tmp, data = wide)$p.value
+        med <- wide %>% group_by(groupe_tmp) %>% summarise(m = median(delta, na.rm=TRUE))
+        diff_med <- diff(med$m)
+        boot <- replicate(2000,{
+          s <- wide %>% group_by(groupe_tmp) %>% slice_sample(prop=1, replace=TRUE) %>% summarise(m=median(delta))
+          diff(s$m)
+        })
+        ic <- quantile(boot, c(0.025,0.975))
+        res$inter <- data.frame(
+          p_inter = round(p_inter,3),
+          diff_med = round(diff_med,2),
+          IC_low = round(ic[1],2),
+          IC_high = round(ic[2],2)
+        )
+      }
+
+    } else {
+      res$global <- data.frame(
+        p_paired = wilcox.test(wide$v3, wide$v1, paired=TRUE)$p.value,
+        delta_med = median(wide$delta, na.rm=TRUE),
+        IC_low  = quantile(wide$delta,0.025,na.rm=TRUE),
+        IC_high = quantile(wide$delta,0.975,na.rm=TRUE)
+      )
+    }
+
+    res
+  }
+
+  stats <- lapply(vars, analyse_variable)
+  names(stats) <- vars
+
+  #=======================================================================
+  # Graphique
+  #=======================================================================
+  p <- ggplot(df_long, aes(x = visite, y = value, group = ID_tmp)) +
+       geom_line(alpha = .35) +
+       geom_point(size = 1.6)
+
+  if(!is.null(groupe))
+    p <- p + aes(color = groupe_tmp)
+
+  if(moyenne){
+    p <- p +
+      stat_summary(aes(group = 1), fun = mean, geom="line",
+                   linewidth=1.4, color="black") +
+      stat_summary(aes(group = 1), fun = mean, geom="point",
+                   size=3, color="black")
+  }
+
+  if(facet)
+    p <- p + facet_wrap(~var_label, scales="free_y",
+                        nrow=nrow_facet, ncol=ncol_facet)
+
+  p <- p + labs(x="Visite", y="Valeur", color="Groupe") + theme_minimal()
+
+  ggsave(output, p, width=11, height=6)
+
+  return(list(plot=p, stats=stats))
+}
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_evolutive3
+# ------------------------------------------------------------------
+# Description :
+# Version améliorée de plot_evolutive2 avec :
+# - Filtrage des variables hors de 'vars' après passage au format long
+#   (évite d'afficher la variable groupe dans les facettes)
+# - Annotations textuelles par groupe (delta médian, IC95%, p-values)
+#   affichées directement sur chaque facette
+# - Bootstrap corrigé pour les IC95% inter-groupes (exclusion des NA)
+#
+# Arguments : identiques à plot_evolutive2.
+# Supplémentaire : toutes les annotations statistiques sont affichées
+# sur le graphique, positionnées dynamiquement selon la plage de Y.
+#
+# Valeur retournée :
+# - Liste avec $plot (ggplot2) et $stats (statistiques par variable)
+#
+# Dépendances :
+# - ggplot2, reshape2, dplyr
+# ------------------------------------------------------------------
+plot_evolutive3 <- function(data,
+                            vars,
+                            labels_vars = vars,
+                            visites = c("v1","v3"),
+                            visites_labels = visites,
+                            sep = "_",
+                            id = "ID",
+                            groupe = NULL,
+                            facet = TRUE,
+                            nrow_facet = NULL,
+                            ncol_facet = NULL,
+                            moyenne = TRUE,
+                            output = "spaghetti_pub.png") {
+
+  # -----------------------
+  # Vérifications
+  # -----------------------
+  if(length(vars) != length(labels_vars))
+    stop("vars et labels_vars doivent avoir la même longueur")
+  if(length(visites) != length(visites_labels))
+    stop("visites et visites_labels doivent avoir la même longueur")
+
+  # -----------------------
+  # Colonnes à utiliser
+  # -----------------------
+  cols <- unlist(lapply(vars, function(v) paste0(visites, sep, v)))
+  cols <- cols[cols %in% names(data)]
+  keep <- c(id, if(!is.null(groupe)) groupe, cols)
+  df <- data[, keep, drop = FALSE]
+
+  # Forcer les colonnes mesures en numérique
+  for(col in cols){
+    df[[col]] <- as.numeric(as.character(df[[col]]))
+  }
+
+  # Colonne temporaire pour groupe
+  if(!is.null(groupe)) df$groupe_tmp <- df[[groupe]]
+
+  # -----------------------
+  # Format long (seulement variables dans vars)
+  # -----------------------
+  df_long <- melt(df, id.vars = c(id, if(!is.null(groupe)) "groupe_tmp"))
+  df_long <- df_long %>% filter(!is.na(value))
+  df_long$visite <- sapply(strsplit(as.character(df_long$variable), sep), `[`, 1)
+  df_long$var <- sub("^[^_]+_", "", df_long$variable)
+  df_long <- df_long %>% filter(var %in% vars) # <-- garder uniquement vars
+  df_long$var_label <- factor(df_long$var,
+                              levels = vars,
+                              labels = labels_vars)
+  df_long$visite <- factor(df_long$visite,
+                           levels = visites,
+                           labels = visites_labels)
+  df_long$ID_tmp <- df_long[[id]]
+
+  # -----------------------
+  # Statistiques
+  # -----------------------
+  analyse_variable <- function(v){
+    tmp <- df_long %>% filter(var == v)
+    wide <- tmp %>% dcast(as.formula(paste(id,"~ visite")), value.var = "value")
+    colnames(wide)[2:3] <- c("v1","v3")
+    wide$v1 <- as.numeric(as.character(wide$v1))
+    wide$v3 <- as.numeric(as.character(wide$v3))
+    wide$delta <- wide$v3 - wide$v1
+    res <- list()
+
+    if(!is.null(groupe)){
+      wide$groupe_tmp <- df[[groupe]][match(wide[[id]], df[[id]])]
+
+      # Intra-groupe
+      res$intra <- wide %>%
+        group_by(groupe_tmp) %>%
+        summarise(
+          n = n(),
+          up   = sum(delta > 0, na.rm=TRUE),
+          down = sum(delta < 0, na.rm=TRUE),
+          same = sum(delta == 0, na.rm=TRUE),
+          p_binom = ifelse(up+down>0, binom.test(up, up+down)$p.value, NA),
+          p_paired = ifelse(sum(!is.na(delta))>3, wilcox.test(v3, v1, paired=TRUE)$p.value, NA),
+          delta_med = ifelse(all(is.na(delta)), NA, median(delta, na.rm=TRUE)),
+          IC_low  = ifelse(all(is.na(delta)), NA, quantile(delta, 0.025, na.rm=TRUE)),
+          IC_high = ifelse(all(is.na(delta)), NA, quantile(delta, 0.975, na.rm=TRUE))
+        )
+
+      # Inter-groupes si exactement 2 groupes
+      if(length(unique(wide$groupe_tmp))==2){
+        p_inter <- wilcox.test(delta ~ groupe_tmp, data = wide)$p.value
+        med <- wide %>% group_by(groupe_tmp) %>% summarise(m = median(delta, na.rm=TRUE))
+        diff_med <- diff(med$m)
+
+        # Bootstrap IC95%
+        boot <- replicate(2000,{
+          s <- wide %>% group_by(groupe_tmp) %>%
+               slice_sample(prop=1, replace=TRUE) %>%
+               summarise(m = median(delta, na.rm=TRUE))
+          diff(s$m)
+        })
+        boot <- boot[!is.na(boot)]
+        ic <- quantile(boot, c(0.025,0.975), na.rm=TRUE)
+
+        res$inter <- data.frame(
+          p_inter = round(p_inter,3),
+          diff_med = round(diff_med,2),
+          IC_low = round(ic[1],2),
+          IC_high = round(ic[2],2)
+        )
+      }
+
+    } else {
+      res$global <- data.frame(
+        p_paired = wilcox.test(wide$v3, wide$v1, paired=TRUE)$p.value,
+        delta_med = median(wide$delta, na.rm=TRUE),
+        IC_low  = quantile(wide$delta,0.025,na.rm=TRUE),
+        IC_high = quantile(wide$delta,0.975,na.rm=TRUE)
+      )
+    }
+
+    res
+  }
+
+  stats <- lapply(vars, analyse_variable)
+  names(stats) <- vars
+
+  # -----------------------
+  # Préparer annotations
+  # -----------------------
+  df_annot <- data.frame()
+  for(v in vars){
+    ann <- stats[[v]]$intra
+    if(!is.null(ann)){
+      ann <- ann %>% mutate(var_label = labels_vars[vars==v])
+      ann$text <- ifelse(!is.null(ann$delta_med),
+                         paste0("Δ médian=", ann$delta_med,
+                                "\nIC95%: [", ann$IC_low, "; ", ann$IC_high, "]",
+                                "\np=", round(ann$p_paired,3)),
+                         "")
+      df_annot <- rbind(df_annot, ann)
+    }
+  }
+
+  # -----------------------
+  # Graphique
+  # -----------------------
+  p <- ggplot(df_long, aes(x = visite, y = value, group = ID_tmp)) +
+       geom_line(alpha = .35) +
+       geom_point(size = 1.6)
+
+  if(!is.null(groupe))
+    p <- p + aes(color = groupe_tmp)
+
+  if(moyenne){
+    p <- p +
+      stat_summary(aes(group = 1), fun = mean, geom="line",
+                   linewidth=1.4, color="black") +
+      stat_summary(aes(group = 1), fun = mean, geom="point",
+                   size=3, color="black")
+  }
+
+  if(facet)
+    p <- p + facet_wrap(~var_label, scales="free_y",
+                        nrow=nrow_facet, ncol=ncol_facet)
+
+  if(nrow(df_annot)>0){
+    p <- p + geom_text(data = df_annot,
+                       aes(x=2.05, y=max(df_long$value, na.rm=TRUE), label=text),
+                       inherit.aes = FALSE, hjust=0, vjust=1, size=3)
+  }
+
+  p <- p + labs(x="Visite", y="Valeur", color="Groupe") + theme_minimal()
+  ggsave(output, p, width=12, height=6)
+
+  return(list(plot=p, stats=stats))
+}
+
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------
+# Fonction : plot_evolutive4
+# ------------------------------------------------------------------
+# Description :
+# Version finale et la plus robuste de plot_evolutive. Par rapport à
+# plot_evolutive3 elle améliore :
+# - Robustesse : suppressWarnings() sur les conversions numériques
+# - Sécurité : retourne NULL si la wide table a moins de 3 colonnes
+# - Annotations décalées dynamiquement vers le bas pour éviter le
+#   chevauchement avec les données (offset de 5% de la plage Y)
+# - Paramètre text_size pour ajuster la taille du texte des annotations
+# - Paramètre base_size pour ajuster la taille de base du thème ggplot2
+#
+# Arguments :
+# - (identiques à plot_evolutive2 +)
+# - text_size : taille du texte des annotations statistiques (défaut 2.2)
+# - base_size : taille de base du thème ggplot2 (défaut 10)
+#
+# Valeur retournée :
+# - Liste avec $plot (ggplot2) et $stats (statistiques par variable)
+#
+# Dépendances :
+# - ggplot2, reshape2, dplyr
+# ------------------------------------------------------------------
+plot_evolutive4 <- function(data,
+                            vars,
+                            labels_vars = vars,
+                            visites = c("v1","v3"),
+                            visites_labels = visites,
+                            sep = "_",
+                            id = "ID",
+                            groupe = NULL,
+                            facet = TRUE,
+                            nrow_facet = NULL,
+                            ncol_facet = NULL,
+                            moyenne = TRUE,
+                            output = "spaghetti_pub.png",
+                            text_size = 2.2,
+                            base_size = 10) {
+
+  if(length(vars) != length(labels_vars))
+    stop("vars et labels_vars doivent avoir la même longueur")
+  if(length(visites) != length(visites_labels))
+    stop("visites et visites_labels doivent avoir la même longueur")
+
+  # -----------------------
+  # Sélection des colonnes
+  # -----------------------
+
+  cols <- unlist(lapply(vars, function(v) paste0(visites, sep, v)))
+  cols <- cols[cols %in% names(data)]
+  keep <- c(id, if(!is.null(groupe)) groupe, cols)
+
+  df <- data[, keep, drop = FALSE]
+
+  for(col in cols){
+    df[[col]] <- suppressWarnings(as.numeric(as.character(df[[col]])))
+  }
+
+  if(!is.null(groupe))
+    df$groupe_tmp <- df[[groupe]]
+
+  # -----------------------
+  # Format long
+  # -----------------------
+
+  df_long <- melt(df, id.vars = c(id, if(!is.null(groupe)) "groupe_tmp"))
+  df_long$value <- suppressWarnings(as.numeric(as.character(df_long$value)))
+  df_long <- df_long %>% filter(!is.na(value))
+
+  df_long$visite <- sapply(strsplit(as.character(df_long$variable), sep), `[`, 1)
+  df_long$var <- sub("^[^_]+_", "", df_long$variable)
+  df_long <- df_long %>% filter(var %in% vars)
+
+  df_long$var_label <- factor(df_long$var,
+                              levels = vars,
+                              labels = labels_vars)
+
+  df_long$visite <- factor(df_long$visite,
+                           levels = visites,
+                           labels = visites_labels)
+
+  df_long$ID_tmp <- df_long[[id]]
+
+  # -----------------------
+  # Analyse statistique
+  # -----------------------
+
+  analyse_variable <- function(v){
+
+    tmp <- df_long %>% filter(var == v)
+    if(nrow(tmp) == 0) return(NULL)
+
+    wide <- tmp %>% dcast(as.formula(paste(id,"~ visite")),
+                          value.var = "value")
+
+    if(ncol(wide) < 3) return(NULL)
+
+    colnames(wide)[2:3] <- c("v1","v3")
+
+    wide$v1 <- suppressWarnings(as.numeric(as.character(wide$v1)))
+    wide$v3 <- suppressWarnings(as.numeric(as.character(wide$v3)))
+    wide$delta <- wide$v3 - wide$v1
+
+    if(!is.null(groupe))
+      wide$groupe_tmp <- df[[groupe]][match(wide[[id]], df[[id]])]
+
+    res <- list()
+
+    if(!is.null(groupe)){
+      res$intra <- wide %>%
+        group_by(groupe_tmp) %>%
+        summarise(
+          n = n(),
+          up   = sum(delta > 0, na.rm=TRUE),
+          down = sum(delta < 0, na.rm=TRUE),
+          same = sum(delta == 0, na.rm=TRUE),
+          p_binom = ifelse(up+down>0,
+                           binom.test(up, up+down)$p.value, NA),
+          p_paired = ifelse(sum(!is.na(delta))>3,
+                            wilcox.test(v3, v1, paired=TRUE)$p.value, NA),
+          delta_med = median(delta, na.rm=TRUE),
+          IC_low  = quantile(delta, 0.025, na.rm=TRUE),
+          IC_high = quantile(delta, 0.975, na.rm=TRUE),
+          .groups = "drop"
+        )
+    }
+
+    res
+  }
+
+  stats <- lapply(vars, analyse_variable)
+  names(stats) <- vars
+
+  # -----------------------
+  # Préparer annotations avec décalage vers le bas
+  # -----------------------
+
+  df_annot <- data.frame()
+
+  for(v in vars){
+
+    ann <- stats[[v]]$intra
+    if(is.null(ann) || nrow(ann)==0) next
+
+    ann$var_label <- labels_vars[vars==v]
+
+    vals <- suppressWarnings(as.numeric(df_long$value[df_long$var==v]))
+    vals <- vals[!is.na(vals)]
+    if(length(vals) < 2) next
+
+    range_val <- max(vals) - min(vals)
+    if(range_val == 0) range_val <- abs(max(vals))
+    if(range_val == 0) range_val <- 1
+
+    step <- 0.15 * range_val
+    ymax <- max(vals)
+
+    # -------------------------
+    # Décalage pour descendre le bloc
+    # -------------------------
+    offset <- 0.05 * range_val   # 5% de la plage pour descendre le bloc
+
+    ann$text <- paste0(
+      "Groupe: ", ann$groupe_tmp,
+      "\nUp=", ann$up,
+      " Down=", ann$down,
+      " Same=", ann$same,
+      "\nΔ médian=", round(ann$delta_med,2),
+      "\nIC95%[", round(ann$IC_low,2), "-", round(ann$IC_high,2), "]",
+      "\np paired=", round(ann$p_paired,2),
+      " | p binom=", round(ann$p_binom,2)
+    )
+
+    ann$y_pos <- ymax - offset - (seq_len(nrow(ann))-1)*step
+    ann$x_pos <- 2.1
+
+    df_annot <- rbind(df_annot, ann)
+  }
+
+  # -----------------------
+  # Graphique
+  # -----------------------
+
+  p <- ggplot(df_long, aes(x = visite, y = value, group = ID_tmp)) +
+       geom_line(alpha = .35) +
+       geom_point(size = 1.6)
+
+  if(!is.null(groupe))
+    p <- p + aes(color = groupe_tmp)
+
+  if(moyenne){
+    p <- p +
+      stat_summary(aes(group = 1),
+                   fun = mean,
+                   geom="line",
+                   linewidth=1.2,
+                   color="black") +
+      stat_summary(aes(group = 1),
+                   fun = mean,
+                   geom="point",
+                   size=2.8,
+                   color="black")
+  }
+
+  if(facet)
+    p <- p + facet_wrap(~var_label,
+                        scales="free_y",
+                        nrow=nrow_facet,
+                        ncol=ncol_facet)
+
+  if(nrow(df_annot)>0){
+    p <- p +
+      geom_text(data = df_annot,
+                aes(x = x_pos,
+                    y = y_pos,
+                    label = text),
+                inherit.aes = FALSE,
+                hjust = 0,
+                size = text_size)
+  }
+
+  p <- p +
+       labs(x="Visite",
+            y="Valeur",
+            color="Groupe") +
+       theme_minimal(base_size = base_size)
+
+  ggsave(output, p, width=12, height=6)
+
+  return(list(plot=p, stats=stats))
+}
+
+```
+
+
