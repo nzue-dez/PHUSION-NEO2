@@ -20,7 +20,6 @@ plot_scatter_pairs(df1, vars = c("pd_n","crib"), point_color = "darkred", test =
 
 #---------------------------------------------------------- Analyse univariée -------------------------------------------------------------------------
 ## Tableau 3 (variables quantitatives)
-vars_quant3 = c("term_cal","pd_n","crib")
 
 lab_quant3 <- list(
   term_cal = "GA at birth (weeks)",
@@ -35,8 +34,6 @@ table_to_word(df1,
 
 
 ## Tableau 3 (variables qualitatives)
-vars_qual3 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","periode")
-
 vars_qual_lab3 <- list(
   grp_term_cal  = "GA at birth, week, n (%)",
   sex           = "Gender, n (%)",
