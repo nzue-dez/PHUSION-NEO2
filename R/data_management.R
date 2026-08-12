@@ -11,12 +11,6 @@ data <- readxl::read_excel(here("data/raw/donnees_phuneo.xlsx"))
 Message <- sprintf("La base contient %d variables dans notre base", dim(data)[2])
 cat(Message)
 
-# Visualisation des variables 
-# colnames(data)
-
-# Visualisation de la base
-# view(data)
-
 # On écarte de l'étude ces trois variables non déterminantes 
 data <- data %>% select(-TERME_JOURS,-TERME_SEM)
 
@@ -102,8 +96,8 @@ dic_vars <- tibble(
     "Dose toale de la corticothérapie générale administrée", # 32
     "Rétinopathie opérée", # 33
     "Décès à la sortie", # 34
-    "Durée totale de ventialtion invasive", # 35
-    "Durée totale de ventialtion non invasive", # 36
+    "Durée totale de ventilation invasive", # 35
+    "Durée totale de ventilation non invasive", # 36
     "Cortisolémie à la naissance" # 37
   ),
   
@@ -184,50 +178,34 @@ Vars = c("DATE_DDN","TERME_CALCUL","SEXE","INBORN_OUTBORN","POIDS_DDN","TAILLE_D
 get_variable_positions(df1, Vars) # (C'est l'une des fonctions incluses dans load_functions)
 
 
-# Renomme les variables du vecteur pour faciliter leur manipulation
-colnames(df1)[2:37] <- c("date_naiss", 
-                         "term_cal",
-                         "sex",
-                         "inborn_status",
-                         "pd_n",
-                         "tll_n",
-                         "pc_n",
-                         "acc",
-                         "gr_mult",
-                         "rpde",
-                         "beta_sone",
-                         "rciu",
-                         "nb_surf",
-                         "pneu_tho",
-                         "hemo_pulm",
-                         "cnl_ttt",
-                         "ca_opr",
-                         "nro_hiv",
-                         "nro_lmpv",
-                         "hiv_plus_lpmv",
-                         "noso",
-                         "ecun",
-                         "ecun_opr",
-                         "perfo_isl",
-                         "dec_36sa",
-                         "dbp_36sa",
-                         "dec_ou_dbp_36sa",
-                         "crib",
-                         "prmloc",
-                         "cortico_tard",
-                         "cortico_gene_doz",
-                         "chir_lser",
-                         "dec_s",
-                         "somcu_int",
-                         "somcu_vni",
-                         "cortisol_n")
+# Renomme les variables pour faciliter leur manipulation.
+# IMPORTANT : le renommage se fait par CORRESPONDANCE DE NOM (dplyr::rename),
+# pas par position -- contrairement à `colnames(df1)[2:37] <- c(...)`, cette
+# approche est robuste à un changement de l'ordre des colonnes dans le fichier
+# source (data/raw/donnees_phuneo.xlsx) : si un nom de colonne attendu (Vars,
+# ci-dessus) n'existe pas dans df1, R lève une erreur explicite au lieu de
+# renommer silencieusement la mauvaise colonne.
+nouveaux_noms <- c("date_naiss", "term_cal", "sex", "inborn_status", "pd_n",
+                    "tll_n", "pc_n", "acc", "gr_mult", "rpde", "beta_sone",
+                    "rciu", "nb_surf", "pneu_tho", "hemo_pulm", "cnl_ttt",
+                    "ca_opr", "nro_hiv", "nro_lmpv", "hiv_plus_lpmv", "noso",
+                    "ecun", "ecun_opr", "perfo_isl", "dec_36sa", "dbp_36sa",
+                    "dec_ou_dbp_36sa", "crib", "prmloc", "cortico_tard",
+                    "cortico_gene_doz", "chir_lser", "dec_s", "somcu_int",
+                    "somcu_vni", "cortisol_n")
+
+stopifnot(length(Vars) == length(nouveaux_noms))
+
+# rename_map : vecteur nommé nouveaux_noms -> Vars (noms bruts), tel qu'attendu
+# par dplyr::rename(df, !!!rename_map)
+rename_map <- setNames(Vars, nouveaux_noms)
+df1 <- df1 %>% dplyr::rename(!!!rename_map)
 
 
 # Contrôle qualité --------------------------------------------------------
 # plot_range_check()      : détection des valeurs aberrantes (variables quantitatives)
 # check_dominance_qual()  : détection des classes déséquilibrées (variables qualitatives)
-# plot_range_check(df1)
-# check_dominance_qual(df1)
+# (appliquées plus bas, une fois les variables qualitatives/quantitatives d'intérêt définies)
 
 
 # Recherche des valeurs "DM" et "NA" dans la base. (À ce stade, les "NA" ne sont pas encore reconnus par le logiciel comme étant des données manquantes; DM représente, en fait, des données manquantes)
@@ -270,7 +248,7 @@ df1$periode <- factor(ifelse(1:nrow(df1) <= 136, 1,
                              ifelse(1:nrow(df1) <= 310, 2, NA)))
 
 
-# Recodage de toutes les variables catégorielles en facteurs avec labels lisibles (NB: on peut mieux faire...)
+# Recodage de toutes les variables catégorielles en facteurs avec labels lisibles
 df1$sex            <- factor(df1$sex,            levels = c(0,1),     labels = c("Homme","Femme"))
 df1$inborn_status  <- factor(df1$inborn_status,  levels = c(0,1),     labels = c("Inborn","Outborn"))
 df1$acc            <- factor(df1$acc,            levels = c(0,1),     labels = c("Voie basse","Césarienne"))
@@ -301,13 +279,13 @@ df1$periode        <- factor(df1$periode,        levels = c(1,2),     labels = c
 
 
 # On forme des sous groupes à partir du terme de naissance (calculé) des nouveau-nés préma. 
-## Découpage indiqué par le medecin ; [minimum(terme caluclé)=23.3;26] et (26;maximum(terme caluclé)=28] 
+## Découpage indiqué par le medecin ; [minimum(terme calculé)=23.3;26] et (26;maximum(terme calculé)=28] 
 df1 <- df1 |> mutate(grp_term_cal = cut(
   term_cal,
   breaks = c(min(df1$term_cal), 25.99, max(df1$term_cal)),
   include.lowest = TRUE,
   right = TRUE,
-  dig.lab = 5 # pour éviter d'arrondi la valeur 25.99 à l'entier supérie
+  dig.lab = 5 # pour éviter d'arrondir la valeur 25.99 à l'entier supérieur
 ))
 
 
@@ -361,13 +339,5 @@ check_vars_quant_value3 <- plot_range_check(df1, vars = vars_quant3, ncol = 3, p
 # On a détecté quelques observations avec des valeurs assez écartées de la plage majoritaire.
 
 # Liste des variables pour lesquelles il y aurait des valeurs potentiellement aberrantes et/ou atypiques
+# (inspection au cas par cas : subset(check_vars_quant_value2$outliers_table, variable == "<nom_variable>"))
 unique(check_vars_quant_value2$outliers_table$variable)
-
-# View pour "somcu_int" (les observations sont; )
-# View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_int"))
-
-# View pour "somcu_vni"  (les observations sont; )
-# View(subset(check_vars_quant_value2$outliers_table,variable == "somcu_vni"))
-
-# View pour "cortico_gene_doz"  (les observations sont; )
-# View(subset(check_vars_quant_value2$outliers_table,variable == "cortico_gene_doz"))

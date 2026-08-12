@@ -20,6 +20,5 @@ rapport.html
 renv/
 # Note : *.Rproj est versionné (paramètres RStudio utiles pour la reproductibilité)
 
-# ── Fichiers Mac ──────────────────────────────────────────────────────────────
+# ── Fichiers Mac ────────────────────────────────────────────────────
 .DS_Store
-R/survival_analysis.R

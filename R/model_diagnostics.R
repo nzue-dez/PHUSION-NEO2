@@ -1,4 +1,8 @@
-# model diagnostics
+# ─────────────────────────────────────────────────────────────────────────────
+# model_diagnostics.R
+# Diagnostics du modèle logistique multivarié (modlog1) : résidus, leviers,
+# distances de Cook — contrôle de la validité interne, usage biostatisticien.
+# ─────────────────────────────────────────────────────────────────────────────
 
 ## Résidus de déviance et Pearson
 res_dev  <- residuals(modlog1, type = "deviance")

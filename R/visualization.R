@@ -29,6 +29,12 @@ box_quant_by_periode$plot <- box_quant_by_periode$plot &
 # Reprend les mêmes variables/labels/conditions que le Tableau 2 (descriptive.R),
 # mais sous forme de graphique en barres pour une lecture visuelle rapide des
 # principaux indicateurs cliniques (décès, DBP, complications) par période.
+#
+# IMPORTANT — dépendance implicite : `conditions` et `lab_qual2` ne sont PAS
+# définis dans ce fichier. Ils sont créés dans R/descriptive.R (Tableau 2) et
+# doivent être présents dans l'environnement global au moment où ce script
+# s'exécute. Ça ne fonctionne que parce que analyse.R source descriptive.R
+# avant visualization.R — ce fichier ne doit pas être exécuté isolément.
 
 calc_taux_qual2 <- function(var) {
 
