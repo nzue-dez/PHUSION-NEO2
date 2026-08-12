@@ -16,3 +16,11 @@ library(here)
 # library(rms)        # décommenter si modélisation avancée
 # library(brms)       # décommenter si modèles bayésiens
 
+# Fonctions de mise en forme des tableaux (projet), construites au-dessus de
+# la bibliothèque personnelle ci-dessus (table_to_word, flextable, officer...)
+source(here::here("R/table_helpers.R"))
+
+# Fonctions de visualisation (projet) : graphiques de corrélation personnalisables
+# (choix du test Pearson/Spearman, p-value affichée proprement sur le graphique)
+source(here::here("R/plot_helpers.R"))
+

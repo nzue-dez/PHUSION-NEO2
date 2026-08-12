@@ -4,36 +4,38 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Etude de corrélation entre les variables quantitatives de la base
-labels <- list(term_cal = "GA at birth (weeks)", pd_n = "Birthweight (g)")
-plot_scatter_pairs(df1, vars = c("term_cal","pd_n"), point_color = "darkred", test = c("pearson"),
-                   labels_list = labels, smooth = c("linear"), ncol = 3, nrow = 1, file_path = "results/scatter_pairs1.pdf")
+# NB : plot_correlation()/save_correlation_grid() (R/plot_helpers.R) affichent
+# proprement le coefficient et la p-value sur chaque graphique, et permettent
+# de choisir le test (method = "pearson" ou "spearman"), le lissage
+# (smooth = "linear" ou "loess"), les couleurs, la position de l'encart, etc.
+corr_labels <- list(
+  term_cal = "GA at birth (weeks)",
+  pd_n     = "Birthweight (g)",
+  crib     = "Crib"
+)
 
-labels <- list(term_cal = "GA at birth (weeks)", crib = "Crib")
-plot_scatter_pairs(df1, vars = c("term_cal","crib"), point_color = "darkred", test = c("pearson"),
-                   labels_list = labels, smooth = c("linear"), ncol = 3, nrow = 1, file_path = "results/scatter_pairs2.pdf")
+save_correlation_grid(df1, pairs = list(c("term_cal", "pd_n")), labels = corr_labels,
+                       method = "pearson", smooth = "linear",
+                       file_path = "results/scatter_pairs1.png")
 
-labels <- list(pd_n = "Birthweight (g)", crib = "Crib")
-plot_scatter_pairs(df1, vars = c("pd_n","crib"), point_color = "darkred", test = c("pearson"),
-                   labels_list = labels, smooth = c("linear"), ncol = 3, nrow = 1, file_path = "results/scatter_pairs3.pdf")
+save_correlation_grid(df1, pairs = list(c("term_cal", "crib")), labels = corr_labels,
+                       method = "pearson", smooth = "linear",
+                       file_path = "results/scatter_pairs2.png")
+
+save_correlation_grid(df1, pairs = list(c("pd_n", "crib")), labels = corr_labels,
+                       method = "pearson", smooth = "linear",
+                       file_path = "results/scatter_pairs3.png")
 
 
 
 #---------------------------------------------------------- Analyse univariée -------------------------------------------------------------------------
-## Tableau 3 (variables quantitatives)
+## Tableau 3 (variables quantitatives + qualitatives fusionnées en un seul tableau)
 
 lab_quant3 <- list(
   term_cal = "GA at birth (weeks)",
   pd_n     = "Birthweight (g)",
   crib     = "Crib")
 
-tab3_quant <- table_to_word(df1,
-              quant_vars = vars_quant3,
-              labels = lab_quant3,
-              group_var = "dec_ou_dbp_36sa",
-              filename = "results/Tableau3_quant.docx")
-
-
-## Tableau 3 (variables qualitatives)
 vars_qual_lab3 <- list(
   grp_term_cal  = "GA at birth, week, n (%)",
   sex           = "Gender, n (%)",
@@ -46,12 +48,14 @@ vars_qual_lab3 <- list(
   nb_surf       = "N doses surfactant, n (%)",
   periode       = "Period")
 
-tab3_qual <- table_to_word(df1,
-              qual_vars = vars_qual3,
-              labels = vars_qual_lab3,
-              group_var = "dec_ou_dbp_36sa",
-              filename = "results/Tableau3_qual.docx")
+tab3 <- merged_desc_table(df1,
+              group_var  = "dec_ou_dbp_36sa",
+              quant_vars = vars_quant3,
+              qual_vars  = vars_qual3,
+              labels     = c(lab_quant3, vars_qual_lab3))
 
+export_flextable_docx(tab3, "Tableau 3 — Analyse univariée des facteurs associés à la survie sans DBP",
+                       "results/Tableau3.docx")
 
 
 
@@ -65,12 +69,7 @@ modlog1 <- glm(Surv_without_dbp36sa ~ term_cal + sex + gr_mult + rpde + rciu + n
 summary(modlog1)
 
 
-# Export des résultats 
-multivari_model <- tbl_regression(modlog1, exponentiate = TRUE)
-multivari_model %>% as_flex_table() %>% flextable::save_as_docx(path = "results/modèle_multivarié.docx")
-
-
-# ---------------------------------------------------------- Forest plot du modèle -----------------------------------------------------------------
+# ---------------------------------------------------------- Extraction des résultats ---------------------------------------------------------------
 res <- tidy(modlog1, exponentiate = TRUE, conf.int = TRUE) %>%
   filter(term != "(Intercept)")
 
@@ -85,6 +84,30 @@ res <- res %>%
                               "nb_surfDeux doses ou plus"             = "Surfactant: ≥2 doses",
                               "periodeRestrictive prophylaxis period" = "Prophylaxis period: Restrictive"
   ))
+
+# ---------------------------------------------------------- Tableau 4 (ORa) au même style que les tableaux descriptifs ------------------------------
+group_defs_model <- list(
+  "Âge gestationnel (par semaine)" = list(type = "continuous", term = "Gestational age (weeks)"),
+  "Sexe" = list(type = "factor", ref = "Homme",
+                terms = c("Sex: Female" = "Femme")),
+  "Grossesse multiple" = list(type = "factor", ref = "Non",
+                terms = c("Multiple pregnancy: Yes" = "Oui")),
+  "Rupture prématurée des membranes" = list(type = "factor", ref = "Non",
+                terms = c("PPROM: Yes" = "Oui")),
+  "RCIU < 10ᵉ percentile" = list(type = "factor", ref = "Non",
+                terms = c("IUGR <10th centile: Yes" = "Oui")),
+  "Surfactant" = list(type = "factor", ref = "Aucune dose",
+                terms = c("Surfactant: One dose"       = "Une dose",
+                          "Surfactant: ≥2 doses"        = "≥ 2 doses")),
+  "Période de prophylaxie" = list(type = "factor", ref = "Élargie",
+                terms = c("Prophylaxis period: Restrictive" = "Restrictive"))
+)
+
+tab4 <- build_or_table(res, group_defs_model)
+
+export_flextable_docx(tab4,
+  "Tableau 4 — Régression logistique multivariée : ORa pour la survie sans DBP à 36 semaines",
+  "results/modele_multivarie.docx")
 
 res <- res %>%
   mutate(

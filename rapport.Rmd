@@ -21,31 +21,9 @@ source(here::here("R/missing_analysis.R"))
 source(here::here("R/statistical_models.R"))
 source(here::here("R/visualization.R"))
 
-# ── Aide de mise en forme (propre à ce rapport, pas à la bibliothèque partagée) ─
-# Rendu flextable d'un tableau produit par table_to_word() : reprend le même
-# repérage lignes parent/enfant que la version Word exportée, sans recalculer
-# aucune statistique (les stats viennent déjà de table_to_word()).
-render_table_flextable <- function(df_out, caption = NULL) {
-  parent_rows <- which(df_out$Variable != "")
-  sig_rows    <- which(suppressWarnings(as.numeric(df_out$`p-value`)) < 0.05)
-
-  ft <- flextable::flextable(df_out)
-  ft <- flextable::fontsize(ft, size = 9, part = "all")
-  ft <- flextable::bold(ft, i = parent_rows, bold = TRUE)
-  ft <- flextable::bg(ft, i = parent_rows, bg = "#F2F2F2")
-  ft <- flextable::padding(ft, i = setdiff(seq_len(nrow(df_out)), parent_rows),
-                           j = "Modalité", padding.left = 20)
-  if (length(sig_rows) > 0) {
-    ft <- flextable::color(ft, i = sig_rows, j = "p-value", color = "#C00000")
-    ft <- flextable::bold(ft, i = sig_rows, j = "p-value", bold = TRUE)
-  }
-  ft <- flextable::bold(ft, part = "header", bold = TRUE)
-  ft <- flextable::bg(ft, part = "header", bg = "#1F3864")
-  ft <- flextable::color(ft, part = "header", color = "white")
-  ft <- flextable::autofit(ft)
-  if (!is.null(caption)) ft <- flextable::set_caption(ft, caption)
-  ft
-}
+# NB : le rendu des tableaux (render_flextable_pro) et la construction des
+# tableaux adaptatifs (merged_desc_table, build_or_table) sont définis dans
+# R/table_helpers.R, déjà chargé par R/load_functions.R ci-dessus.
 ```
 
 ## Objectif et méthodes
@@ -54,9 +32,9 @@ render_table_flextable <- function(df_out, caption = NULL) {
 
 **Population et données.** Il s'agit d'une étude de cohorte observationnelle monocentrique, à recueil rétrospectif puis prospectif, conduite dans le service de réanimation néonatale du Centre Hospitalier Intercommunal de Créteil. Trois cent une observations ont été incluses : 136 durant la période à indication élargie et 165 durant la période à indication restrictive. Le critère de jugement principal est la survie sans DBP à 36 semaines d'âge post-menstruel ; les critères secondaires regroupent les composantes de mortalité et de morbidité néonatale (durée de ventilation, hémorragies intraventriculaires sévères, sepsis tardif, entérocolite ulcéro-nécrosante, entre autres).
 
-**Méthodes statistiques.** Les variables quantitatives sont décrites en médiane (intervalle interquartile) et moyenne (écart-type), et comparées par le test de Wilcoxon-Mann-Whitney. Les variables qualitatives sont décrites en effectifs et pourcentages, et comparées par le test du Chi² ou, lorsque les effectifs attendus étaient faibles, par le test exact de Fisher. Le seuil de significativité a été fixé à 5 % en test bilatéral.
+**Méthodes statistiques.** Pour chaque variable quantitative, la normalité de sa distribution au sein des groupes comparés a été évaluée (test de Shapiro-Wilk) afin de choisir automatiquement le résumé et le test les plus appropriés : en cas de normalité, la variable est décrite en moyenne (écart-type) et comparée par le test de Student ; sinon, elle est décrite en médiane (intervalle interquartile) et comparée par le test de Wilcoxon-Mann-Whitney. Les variables qualitatives sont décrites en effectifs et pourcentages, et comparées par le test du Chi² ou, lorsque les effectifs attendus étaient faibles, par le test exact de Fisher. Le seuil de significativité a été fixé à 5 % en test bilatéral ; dans les tableaux, la significativité est signalée directement sur la p-value par des étoiles (* p < 0.05 ; ** p < 0.01 ; *** p < 0.001) plutôt que par une colonne dédiée au test.
 
-Les facteurs associés au critère de jugement principal ont été recherchés en deux temps. Une analyse univariée a d'abord permis de repérer les variables associées à l'issue au seuil conventionnel ou présentant une tendance à l'association (p < 0.2) ; ces variables, ainsi que la période de prophylaxie — imposée a priori indépendamment de sa significativité univariée — ont ensuite été intégrées dans un modèle de régression logistique multivariée. Une étude préalable des corrélations entre l'âge gestationnel, le poids de naissance et le score CRIB a permis d'écarter la redondance d'information entre ces trois indicateurs étroitement liés ; seul l'âge gestationnel a été retenu dans le modèle final. La robustesse du modèle a fait l'objet des vérifications méthodologiques usuelles, rapportées séparément en annexe technique à l'attention du lecteur biostatisticien. Les résultats du modèle sont exprimés en odds ratios ajustés (ORa) pour la survie sans DBP, avec leur intervalle de confiance à 95 % (IC95 %).
+Les facteurs associés au critère de jugement principal ont été recherchés en deux temps. Une analyse univariée a d'abord permis de repérer les variables associées à l'issue au seuil conventionnel ou présentant une tendance à l'association (p < 0.2) ; ces variables, ainsi que la période de prophylaxie — imposée a priori indépendamment de sa significativité univariée — ont ensuite été intégrées dans un modèle de régression logistique multivariée. Une étude préalable des corrélations entre l'âge gestationnel, le poids de naissance et le score CRIB a permis d'écarter la redondance d'information entre ces trois indicateurs étroitement liés ; seul l'âge gestationnel a été retenu dans le modèle final. La validité du modèle a été vérifiée selon les critères méthodologiques usuels. Les résultats du modèle sont exprimés en odds ratios ajustés (ORa) pour la survie sans DBP, avec leur intervalle de confiance à 95 % (IC95 %).
 
 Toutes les analyses ont été réalisées avec le logiciel R (version 4.5.2).
 
@@ -126,11 +104,11 @@ if (nrow(res_periode) == 1) {
 Caractéristiques des patients inclus, comparées entre les deux périodes de prophylaxie (Tableau 1).
 
 ```{r tab1-quant}
-render_table_flextable(tab1_quant, "Tableau 1a — Caractéristiques quantitatives")
+render_flextable_pro(tab1_quant, "Tableau 1a — Caractéristiques quantitatives")
 ```
 
 ```{r tab1-qual}
-render_table_flextable(tab1_qual, "Tableau 1b — Caractéristiques qualitatives")
+render_flextable_pro(tab1_qual, "Tableau 1b — Caractéristiques qualitatives")
 ```
 
 ```{r fig-box-quant, fig.width=10, fig.height=4}
@@ -163,24 +141,6 @@ box_quant_by_periode$plot
 
 **Prophylaxie par hydrocortisone.** Différence très significative, attendue par construction même des deux périodes (p < 0.001) : 94.1 % des enfants de la période élargie ont reçu la prophylaxie, contre 61.2 % en période restrictive — ce résidu de 61.2 % traduisant les indications encore retenues malgré la politique restrictive.
 
-## Qualité des données
-
-```{r missing-summary}
-render_table_flextable(
-  data.frame(
-    Variable = missing_per_var$Variable,
-    Modalité = "",
-    n = "",
-    Total = paste0(missing_per_var$Donnees_manquantes, " (", missing_per_var$Pourcentage_manquant, ")"),
-    Test = "", `p-value` = "",
-    check.names = FALSE
-  ),
-  "Données manquantes sur les variables retenues pour l'analyse univariée"
-)
-```
-
-La variable `crib` présente le taux de données manquantes le plus élevé ; son caractère manquant est lié à la période d'inclusion (MAR conditionnel), une exclusion a donc été envisagée avant la modélisation multivariée (cf. `statistical_models.R`).
-
 ## Résultats cliniques
 
 Critères de jugement et complications observés, comparés entre les deux périodes (Tableau 2).
@@ -189,12 +149,8 @@ Critères de jugement et complications observés, comparés entre les deux péri
 bar_outcomes_by_periode
 ```
 
-```{r tab2-quant}
-render_table_flextable(tab2_quant, "Tableau 2a — Critères de jugement quantitatifs")
-```
-
-```{r tab2-qual}
-render_table_flextable(tab2_qual, "Tableau 2b — Critères de jugement qualitatifs")
+```{r tab2}
+render_flextable_pro(tab2, "Tableau 2 — Critères de jugement et complications pendant les deux périodes")
 ```
 
 ### Lecture du Tableau 2
@@ -231,12 +187,8 @@ render_table_flextable(tab2_qual, "Tableau 2b — Critères de jugement qualitat
 
 Une première analyse univariée a permis d'identifier les caractéristiques cliniques et périnatales associées à la survie sans DBP à 36 semaines (Tableau 3). Les variables atteignant le seuil conventionnel de significativité ou une simple tendance (p < 0.2) ont ensuite été soumises à un modèle de régression logistique multivariée, avec la période de prophylaxie imposée a priori indépendamment de son résultat univarié.
 
-```{r tab3-quant}
-render_table_flextable(tab3_quant, "Tableau 3a — Analyse univariée, variables quantitatives")
-```
-
-```{r tab3-qual}
-render_table_flextable(tab3_qual, "Tableau 3b — Analyse univariée, variables qualitatives")
+```{r tab3}
+render_flextable_pro(tab3, "Tableau 3 — Analyse univariée des facteurs associés à la survie sans DBP")
 ```
 
 ### Lecture du Tableau 3
@@ -287,18 +239,9 @@ Ces trois indicateurs sont fortement corrélés entre eux, ce qui traduit une re
 
 Le modèle final inclut l'âge gestationnel à la naissance, le sexe, la grossesse multiple, la rupture prématurée des membranes, le retard de croissance intra-utérin, le nombre de doses de surfactant et la période de prophylaxie. Les résultats sont exprimés en odds ratios ajustés (ORa) pour la survie sans DBP à 36 semaines, avec leur intervalle de confiance à 95 % (Tableau 4).
 
-**Tableau 4 — Régression logistique multivariée : ORa pour la survie sans DBP à 36 semaines**
-
-| Caractéristique | ORa | IC95 % | p |
-|---|---|---|---|
-| Âge gestationnel (par semaine) | 1.80 | [1.40 ; 2.33] | < 0.001 |
-| Sexe — Femme (réf. Homme) | 1.99 | [1.16 ; 3.49] | 0.014 |
-| Grossesse multiple — Oui (réf. Non) | 0.68 | [0.36 ; 1.28] | 0.20 |
-| Rupture prématurée des membranes — Oui (réf. Non) | 1.45 | [0.80 ; 2.65] | 0.20 |
-| RCIU < 10ᵉ percentile — Oui (réf. Non) | 0.37 | [0.15 ; 0.87] | 0.025 |
-| Surfactant — 1 dose (réf. aucune dose) | 0.34 | [0.13 ; 0.76] | 0.013 |
-| Surfactant — ≥ 2 doses (réf. aucune dose) | 0.13 | [0.05 ; 0.33] | < 0.001 |
-| Période — Restrictive (réf. Élargie) | 0.59 | [0.34 ; 1.02] | 0.062 |
+```{r tab4}
+render_flextable_pro(tab4, "Tableau 4 — Régression logistique multivariée : ORa pour la survie sans DBP à 36 semaines")
+```
 
 ```{r forest-plot, fig.width=9, fig.height=6}
 p
@@ -316,7 +259,7 @@ p
 
 **Période de prophylaxie.** La période restrictive est associée à des chances de survie sans DBP réduites d'environ 40 % par rapport à la période élargie (ORa = 0.59 ; IC95 % 0.34–1.02 ; p = 0.062). Cet effet, bien qu'il n'atteigne pas formellement le seuil conventionnel de significativité, s'en approche fortement — la borne supérieure de son intervalle de confiance touchant juste la valeur 1 — et va dans le même sens que les résultats descriptifs (Tableaux 1 et 2), qui suggéraient déjà un profil respiratoire légèrement moins favorable en période restrictive. Ce résultat, à la limite de la significativité statistique, doit être interprété avec prudence.
 
-**Grossesse multiple et rupture prématurée des membranes.** Aucune association indépendante significative avec la survie sans DBP n'est mise en évidence après ajustement pour ces deux variables (ORa = 0.68, p = 0.20 et ORa = 1.45, p = 0.20 respectivement) ; leurs intervalles de confiance recoupent largement la valeur 1.
+**Grossesse multiple et rupture prématurée des membranes.** Aucune association indépendante significative avec la survie sans DBP n'est mise en évidence après ajustement pour ces deux variables (ORa = 0.68, p = 0.232 et ORa = 1.45, p = 0.221 respectivement) ; leurs intervalles de confiance recoupent largement la valeur 1.
 
 ## Synthèse
 
@@ -350,12 +293,4 @@ if (nrow(sig_res) == 0) {
     ))
   }
 }
-```
-
-## Annexe technique (validité du modèle)
-
-*Section réservée aux lecteurs biostatisticiens — diagnostics du modèle multivarié (résidus, leviers, distance de Cook, surdispersion).*
-
-```{r model-diagnostics, echo=FALSE}
-source(here::here("R/model_diagnostics.R"), echo = TRUE, print.eval = TRUE)
 ```

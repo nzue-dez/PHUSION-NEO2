@@ -15,8 +15,7 @@ Ont été inclus les grands prématurés (<= 28 SA) pris en charge durant deux p
 Le critère de jugement principal était la survie sans DBP à 36 semaine d'âge post-menstruel. les critères secondaires incluaient les composantes individuelles de mortalité et de morbidité néonatale.
 
 ### Méthodes statistiques
-Statistique descriptive : les variables continues sont exprimées en médiane (écart interquartile, EIQ) et en moyenne (écart-type, SD). Les comparaisons entre groupes ont utilisé le test de Wilcoxon-Mann-Whitney pour les variables continues et le
-test du CHI2 ou le test exact de Fisher (lorsque plus de 20% des attendus étaient inférieur à 5) pour les variables catégorielles. Tous les tests étaient bilatéraux, avec un seuil de significativité fixé à alpha = 0.05.
+Statistique descriptive : pour chaque variable continue, la normalité au sein des groupes comparés est évaluée automatiquement (test de Shapiro-Wilk) afin de choisir le résumé et le test les plus adaptés -- moyenne (écart-type, SD) et test de Student en cas de normalité, sinon médiane (écart interquartile, EIQ) et test de Wilcoxon-Mann-Whitney. Les variables catégorielles sont comparées par le test du CHI2 ou le test exact de Fisher (lorsque plus de 20% des effectifs attendus étaient inférieurs à 5). Tous les tests étaient bilatéraux, avec un seuil de significativité fixé à alpha = 0.05 ; dans les tableaux, la significativité est indiquée directement sur la p-value par des étoiles (* p<0.05 ; ** p<0.01 ; *** p<0.001) plutôt que par une colonne dédiée au test utilisé.
 
 Analyse univariée : Les variables ont été comparées entre les enfants ayant survécu sans DBP et ceux décédés ou ayant développé une DBP. Les variables atteignant p<0.2, en analyse univariée étaient candidates à l'inclusion dans le modèle multivarié.
 La période de prophylaxie a été forcée dans le modèle a priori, indépendamment de sa valeur p univariée.
@@ -45,12 +44,12 @@ Le modèle de régression logistique multivariée (survie sans DBP à 36 SA, aju
 | Surfactant — 1 dose (réf. aucune dose) | 0.34 | [0.13 ; 0.76] | 0.013 |
 | Surfactant — ≥ 2 doses (réf. aucune dose) | 0.13 | [0.05 ; 0.33] | < 0.001 |
 | Période — Restrictive (réf. Élargie) | 0.59 | [0.34 ; 1.02] | 0.062 |
-| Grossesse multiple — Oui (réf. Non) | 0.68 | [0.36 ; 1.28] | 0.20 |
-| Rupture prématurée des membranes — Oui (réf. Non) | 1.45 | [0.80 ; 2.65] | 0.20 |
+| Grossesse multiple — Oui (réf. Non) | 0.68 | [0.36 ; 1.28] | 0.232 |
+| Rupture prématurée des membranes — Oui (réf. Non) | 1.45 | [0.80 ; 2.65] | 0.221 |
 
 **Interprétation.** L'âge gestationnel, le sexe féminin, l'absence de RCIU et un moindre recours au surfactant sont indépendamment associés à une probabilité plus élevée de survie sans DBP. La période de prophylaxie restrictive est associée à une réduction d'environ 40 % des chances de survie sans DBP par rapport à la période élargie, un effet à la limite de la significativité statistique (p = 0.062) qui doit être interprété avec prudence. La grossesse multiple et la rupture prématurée des membranes ne sont pas retenues comme facteurs indépendants dans ce modèle.
 
-Le détail complet des analyses (tableaux descriptifs, analyse univariée, corrélations, lecture du forest plot) est disponible dans `rapport.docx`. Les diagnostics de validité du modèle (résidus, points influents, adéquation globale) sont présentés séparément dans son annexe technique, à l'attention du lecteur biostatisticien.
+Le détail complet des analyses (tableaux descriptifs, analyse univariée, corrélations, lecture du forest plot) est disponible dans `rapport.docx`. Ce rapport est rédigé pour un lectorat non statisticien : les diagnostics de validité du modèle (résidus, points influents, test de Hosmer-Lemeshow) ne figurent volontairement pas dans le rapport et restent consultables via `R/model_diagnostics.R`.
 
 ## Structure
 
@@ -65,13 +64,16 @@ PHUSION NEO2/
 │   │   ├── 04_modelisation.Rmd
 │   │   ├── 05_export.Rmd
 │   │   └── 06_survie.Rmd
-│   ├── load_functions.R      # Packages + chargement de R/fonctions/
+│   ├── load_functions.R      # Packages + chargement de R/fonctions/, R/table_helpers.R, R/plot_helpers.R
+│   ├── table_helpers.R       # Tableaux adaptatifs (normalité -> moyenne/médiane), fusion quant+qual,
+│   │                         # étoiles de significativité, rendu flextable unifié (voir ci-dessous)
+│   ├── plot_helpers.R        # Graphiques de corrélation personnalisables (Pearson/Spearman, p-value affichée)
 │   ├── data_management.R     # Import, contrôle qualité, nettoyage, recodage, variable dépendante  [Étape 2]
-│   ├── descriptive.R         # Tableau 1 (population générale), Tableaux 2-3 (périodes) [Étape 3]
+│   ├── descriptive.R         # Tableau 1 (population générale), Tableau 2 (critères de jugement) [Étape 3]
 │   ├── missing_analysis.R    # Taux de manquants, patterns, mécanisme (MAR/MCAR/MNAR)   [Étapes 4-5]
 │   │                         # → Étape 5 : imputation non nécessaire (manquants < 5%)
-│   ├── statistical_models.R  # Colinéarité, analyse univariée, modèle multivarié        [Étapes 6-7-8]
-│   ├── model_diagnostics.R   # Hosmer-Lemeshow, résidus, VIF, courbe ROC                [Étape 9]
+│   ├── statistical_models.R  # Corrélations, Tableau 3 (analyse univariée), modèle multivarié (Tableau 4) [Étapes 6-7-8]
+│   ├── model_diagnostics.R   # Hosmer-Lemeshow, résidus, VIF, courbe ROC (non inclus dans rapport.Rmd) [Étape 9]
 │   └── visualization.R       # Figures finales pour publication                          [Étape 10]
 ├── data/
 │   ├── raw/                  # Données brutes (non versionnées)
@@ -93,6 +95,17 @@ La bibliothèque personnelle de fonctions biostat est autonome et versionnée da
 ```r
 source(here::here("R/load_functions.R"))  # charge R/fonctions/charger_fonctions.R + packages du projet
 ```
+
+## Fonctions de mise en forme du rapport (`R/table_helpers.R`, `R/plot_helpers.R`)
+
+Ces deux fichiers, également chargés par `R/load_functions.R`, fournissent les fonctions « projet » utilisées par `descriptive.R`, `statistical_models.R` et `rapport.Rmd` :
+
+- **`merged_desc_table()`** : construit un tableau descriptif en choisissant automatiquement, pour chaque variable quantitative, moyenne (écart-type) + test de Student en cas de normalité (Shapiro-Wilk), sinon médiane (IQR) + test de Wilcoxon ; les variables qualitatives et quantitatives peuvent être fusionnées dans un même tableau (utilisé pour les Tableaux 2 et 3).
+- **`build_or_table()`** : transforme les résultats d'un modèle de régression logistique (`broom::tidy(..., exponentiate = TRUE)`) en tableau ORa/IC95%/p-value avec lignes de référence, prêt pour `render_flextable_pro()` (utilisé pour le Tableau 4).
+- **`render_flextable_pro()`** : rendu flextable unique pour tous les tableaux du rapport (en-tête bleu marine/blanc, lignes parent grisées, largeur fixe proportionnelle qui tient toujours dans la page). La significativité est signalée par des étoiles sur la p-value (`* p<0.05`, `** p<0.01`, `*** p<0.001`) au lieu d'une colonne dédiée au test.
+- **`export_flextable_docx()`** : exporte un tableau construit par les fonctions ci-dessus vers un fichier Word autonome dans `results/`, avec le même rendu que dans le rapport.
+- **`plot_correlation()`** : nuage de points + droite de tendance pour une paire de variables quantitatives, avec le coefficient de corrélation et sa p-value affichés proprement sur le graphique (étoiles de significativité incluses). Personnalisable : `method = "pearson"` ou `"spearman"`, `smooth = "linear"` ou `"loess"`, couleurs, taille/transparence des points, nombre de décimales, position de l'encart (`label_pos`).
+- **`save_correlation_grid()`** : applique `plot_correlation()` à une ou plusieurs paires de variables et assemble le résultat (via `patchwork`) dans une figure correctement proportionnée, sauvegardée en PNG (utilisé pour les trois figures de corrélation âge gestationnel / poids de naissance / score CRIB).
 
 ## Note confidentialité
 

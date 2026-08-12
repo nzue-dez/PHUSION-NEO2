@@ -5,16 +5,21 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Tableau 1 (variables quantitatives)
+# NB : le choix moyenne(ET) vs médiane(EIQ) et du test associé (Student vs
+# Wilcoxon) est fait automatiquement par variable selon la normalité
+# (Shapiro-Wilk) via merged_desc_table() -- voir R/table_helpers.R.
 lab_quant1 <- list(
   term_cal = "GA at birth (weeks)",
   pd_n     = "Birthweight (g)",
   crib     = "Crib")
 
-tab1_quant <- table_to_word(df1,
+tab1_quant <- merged_desc_table(df1,
+              group_var  = "periode",
               quant_vars = vars_quant1,
-              labels = lab_quant1,
-              group_var = "periode",
-              filename = "results/Tableau1_quant.docx")
+              labels     = lab_quant1)
+
+export_flextable_docx(tab1_quant, "Tableau 1a — Caractéristiques quantitatives",
+                       "results/Tableau1_quant.docx")
 
 
 
@@ -31,27 +36,21 @@ vars_qual_lab1 <- list(
   nb_surf      = "N doses surfactant, n (%)",
   prmloc       = "N receiving prophylaxis hydrocortisone, n (%)")
 
-tab1_qual <- table_to_word(df1,
-              qual_vars = vars_qual1,
-              labels = vars_qual_lab1,
+tab1_qual <- merged_desc_table(df1,
               group_var = "periode",
-              filename = "results/Tableau1_qual.docx")
+              qual_vars = vars_qual1,
+              labels    = vars_qual_lab1)
+
+export_flextable_docx(tab1_qual, "Tableau 1b — Caractéristiques qualitatives",
+                       "results/Tableau1_qual.docx")
 
 
-# Tableau 2 (variables quantitatives)
+# Tableau 2 (variables quantitatives + qualitatives fusionnées en un seul tableau)
 lab_quant2 <- list(
   somcu_int        = "Cumulated duration of invasive ventilation (d)",
   somcu_vni        = "Cumulated duration of non-invasive ventilation (d)",
   cortico_gene_doz = "Dose of postnatal steroids (mg/kg)")
 
-tab2_quant <- table_to_word(df1,
-              quant_vars = vars_quant2,
-              labels = lab_quant2,
-              group_var = "periode",
-              filename = "results/Tableau2_quant.docx")
-
-
-# Tableau 2 (variables qualitatives)
 lab_qual2 <- list(
   dec_ou_dbp_36sa = "Death or DBP at 36 weeks, n (%)",
   dec_36sa        = "Death at 36 weeks, n (%)",
@@ -74,9 +73,12 @@ conditions = list(
   dbp_36sa  = quote(dec_s == "Non")
 )
 
-tab2_qual <- table_to_word(df1,
-              qual_vars = vars_qual2,
-              labels = lab_qual2,
-              group_var = "periode",
-              conditions = conditions,
-              filename = "results/Tableau2_qual.docx")
+tab2 <- merged_desc_table(df1,
+              group_var  = "periode",
+              quant_vars = vars_quant2,
+              qual_vars  = vars_qual2,
+              labels     = c(lab_quant2, lab_qual2),
+              conditions = conditions)
+
+export_flextable_docx(tab2, "Tableau 2 — Critères de jugement et complications",
+                       "results/Tableau2.docx")
