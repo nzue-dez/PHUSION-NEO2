@@ -29,6 +29,28 @@ le test de Hosmer-Lemeshow. Les résultats sont exprimés en odds ratios ajusté
 
 NB : Toutes les analyses ont été réalisées sous R version 4.5.2.
 
+## Résultats clés
+
+Trois cent une (301) observations ont été incluses : 136 en période à indication élargie et 165 en période à indication restrictive.
+
+En analyse descriptive, la survie sans DBP est numériquement plus élevée en période élargie (63.2 %) qu'en période restrictive (55.8 %), sans que cette différence brute n'atteigne la significativité statistique (p = 0.189).
+
+Le modèle de régression logistique multivariée (survie sans DBP à 36 SA, ajusté sur l'âge gestationnel, le sexe, la grossesse multiple, la rupture prématurée des membranes, le RCIU, le nombre de doses de surfactant et la période de prophylaxie) identifie les facteurs suivants :
+
+| Caractéristique | ORa | IC95 % | p |
+|---|---|---|---|
+| Âge gestationnel (par semaine) | 1.80 | [1.40 ; 2.33] | < 0.001 |
+| Sexe — Femme (réf. Homme) | 1.99 | [1.16 ; 3.49] | 0.014 |
+| RCIU < 10ᵉ percentile — Oui (réf. Non) | 0.37 | [0.15 ; 0.87] | 0.025 |
+| Surfactant — 1 dose (réf. aucune dose) | 0.34 | [0.13 ; 0.76] | 0.013 |
+| Surfactant — ≥ 2 doses (réf. aucune dose) | 0.13 | [0.05 ; 0.33] | < 0.001 |
+| Période — Restrictive (réf. Élargie) | 0.59 | [0.34 ; 1.02] | 0.062 |
+| Grossesse multiple — Oui (réf. Non) | 0.68 | [0.36 ; 1.28] | 0.20 |
+| Rupture prématurée des membranes — Oui (réf. Non) | 1.45 | [0.80 ; 2.65] | 0.20 |
+
+**Interprétation.** L'âge gestationnel, le sexe féminin, l'absence de RCIU et un moindre recours au surfactant sont indépendamment associés à une probabilité plus élevée de survie sans DBP. La période de prophylaxie restrictive est associée à une réduction d'environ 40 % des chances de survie sans DBP par rapport à la période élargie, un effet à la limite de la significativité statistique (p = 0.062) qui doit être interprété avec prudence. La grossesse multiple et la rupture prématurée des membranes ne sont pas retenues comme facteurs indépendants dans ce modèle.
+
+Le détail complet des analyses (tableaux descriptifs, analyse univariée, corrélations, lecture du forest plot) est disponible dans `rapport.docx`. Les diagnostics de validité du modèle (résidus, points influents, adéquation globale) sont présentés séparément dans son annexe technique, à l'attention du lecteur biostatisticien.
 
 ## Structure
 
