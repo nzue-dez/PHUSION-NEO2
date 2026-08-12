@@ -4,7 +4,7 @@ author: "D. Kouadio"
 date: "`r Sys.Date()`"
 output:
   word_document:
-    toc: true
+    toc: false
 ---
 
 ```{r setup, include=FALSE}
@@ -47,6 +47,18 @@ render_table_flextable <- function(df_out, caption = NULL) {
   ft
 }
 ```
+
+## Objectif et méthodes
+
+**Objectif.** Ce travail vise à identifier les facteurs indépendamment associés à la survie sans dysplasie bronchopulmonaire (DBP) à 36 semaines d'âge post-menstruel chez les grands prématurés (≤ 28 semaines d'aménorrhée), avec une attention particulière portée à l'impact de la stratégie de prophylaxie par hydrocortisone à faible dose : une période à indication élargie (octobre 2017 – février 2021) suivie d'une période à indication restrictive (à partir de mars 2021).
+
+**Population et données.** Il s'agit d'une étude de cohorte observationnelle monocentrique, à recueil rétrospectif puis prospectif, conduite dans le service de réanimation néonatale du Centre Hospitalier Intercommunal de Créteil. Trois cent une observations ont été incluses : 136 durant la période à indication élargie et 165 durant la période à indication restrictive. Le critère de jugement principal est la survie sans DBP à 36 semaines d'âge post-menstruel ; les critères secondaires regroupent les composantes de mortalité et de morbidité néonatale (durée de ventilation, hémorragies intraventriculaires sévères, sepsis tardif, entérocolite ulcéro-nécrosante, entre autres).
+
+**Méthodes statistiques.** Les variables quantitatives sont décrites en médiane (intervalle interquartile) et moyenne (écart-type), et comparées par le test de Wilcoxon-Mann-Whitney. Les variables qualitatives sont décrites en effectifs et pourcentages, et comparées par le test du Chi² ou, lorsque les effectifs attendus étaient faibles, par le test exact de Fisher. Le seuil de significativité a été fixé à 5 % en test bilatéral.
+
+Les facteurs associés au critère de jugement principal ont été recherchés en deux temps. Une analyse univariée a d'abord permis de repérer les variables associées à l'issue au seuil conventionnel ou présentant une tendance à l'association (p < 0.2) ; ces variables, ainsi que la période de prophylaxie — imposée a priori indépendamment de sa significativité univariée — ont ensuite été intégrées dans un modèle de régression logistique multivariée. Une étude préalable des corrélations entre l'âge gestationnel, le poids de naissance et le score CRIB a permis d'écarter la redondance d'information entre ces trois indicateurs étroitement liés ; seul l'âge gestationnel a été retenu dans le modèle final. La robustesse du modèle a fait l'objet des vérifications méthodologiques usuelles, rapportées séparément en annexe technique à l'attention du lecteur biostatisticien. Les résultats du modèle sont exprimés en odds ratios ajustés (ORa) pour la survie sans DBP, avec leur intervalle de confiance à 95 % (IC95 %).
+
+Toutes les analyses ont été réalisées avec le logiciel R (version 4.5.2).
 
 ## Résumé exécutif
 
@@ -100,10 +112,10 @@ ft_kpi
 
 ```{r msg-exec, results = "asis"}
 if (nrow(res_periode) == 1) {
-  sens <- if (res_periode$estimate < 1) "réduit" else "augmenté"
+  sens <- if (res_periode$estimate < 1) "réduite" else "augmentée"
   sig  <- if (res_periode$p.value < 0.05) "de façon statistiquement significative" else "sans que la différence soit statistiquement significative"
   cat(sprintf(
-    "**Message clé :** après ajustement sur les autres facteurs, le risque de décès ou de DBP à 36 SA est %s en période de prophylaxie restrictive (OR = %.2f, IC95%% [%.2f–%.2f]), %s (p = %.3f).",
+    "**Message clé :** après ajustement sur les autres facteurs, la probabilité de survie sans DBP à 36 SA est %s en période de prophylaxie restrictive (ORa = %.2f, IC95%% [%.2f–%.2f]), %s (p = %.3f).",
     sens, res_periode$estimate, res_periode$conf.low, res_periode$conf.high, sig, res_periode$p.value
   ))
 }
@@ -124,6 +136,32 @@ render_table_flextable(tab1_qual, "Tableau 1b — Caractéristiques qualitatives
 ```{r fig-box-quant, fig.width=10, fig.height=4}
 box_quant_by_periode$plot
 ```
+
+### Lecture du Tableau 1
+
+**Âge gestationnel à la naissance.** La différence entre les deux périodes est à la limite de la significativité (p = 0.081) : l'âge gestationnel médian est légèrement plus élevé en période restrictive (26.4 semaines contre 26.0 semaines). Cette différence devient significative lorsque l'âge est catégorisé (p = 0.018) : la proportion de grands prématurés de moins de 26 semaines est plus importante en période élargie (49.3 % contre 35.8 %).
+
+**Poids de naissance.** Aucune différence entre les deux périodes (p = 0.689) ; les valeurs médianes sont proches (775 g contre 780 g).
+
+**Score CRIB.** Aucune différence significative (p = 0.271). Les données manquantes sont très majoritairement concentrées sur la période restrictive (33 valeurs manquantes sur 34), ce qui invite à la prudence dans l'interprétation de cette comparaison.
+
+**Sexe.** Répartition comparable entre les deux périodes (p = 0.370).
+
+**Statut « inborn ».** Pas de différence significative (p = 0.180) ; la grande majorité des enfants (91.4 %) sont nés au CHIC.
+
+**Mode d'accouchement.** Tendance à davantage de césariennes en période restrictive (57 % contre 46.3 %), à la limite de la significativité (p = 0.066).
+
+**Grossesse multiple.** Différence significative (p = 0.001) : les grossesses multiples sont deux fois plus fréquentes en période élargie (31.6 % contre 15.8 %).
+
+**Rupture prématurée des membranes.** Pas de différence significative entre les deux périodes (p = 0.349).
+
+**Corticothérapie anténatale.** Pas de différence significative (p = 0.276) ; une cure complète a été administrée dans plus des trois quarts des cas dans les deux groupes.
+
+**Retard de croissance intra-utérin (RCIU < 10ᵉ percentile).** Pas de différence significative (p = 0.244), avec une fréquence numériquement plus élevée en période restrictive (13.9 % contre 9.6 %).
+
+**Doses de surfactant.** Répartition comparable entre les deux périodes (p = 0.696).
+
+**Prophylaxie par hydrocortisone.** Différence très significative, attendue par construction même des deux périodes (p < 0.001) : 94.1 % des enfants de la période élargie ont reçu la prophylaxie, contre 61.2 % en période restrictive — ce résidu de 61.2 % traduisant les indications encore retenues malgré la politique restrictive.
 
 ## Qualité des données
 
@@ -159,9 +197,39 @@ render_table_flextable(tab2_quant, "Tableau 2a — Critères de jugement quantit
 render_table_flextable(tab2_qual, "Tableau 2b — Critères de jugement qualitatifs")
 ```
 
+### Lecture du Tableau 2
+
+**Décès ou DBP à 36 semaines (critère de jugement principal).** Pas de différence statistiquement significative entre les deux périodes (p = 0.189), avec toutefois une tendance à un moins bon pronostic en période restrictive (44.2 % de décès ou de DBP contre 36.8 % en période élargie).
+
+**Décès à 36 semaines.** Pas de différence significative (p = 0.508) ; la mortalité reste faible et comparable dans les deux groupes (4.8–6.6 %).
+
+**DBP à 36 semaines parmi les survivants.** Tendance à une fréquence plus élevée de DBP en période restrictive (41.7 % contre 31 %), à la limite de la significativité (p = 0.064).
+
+**Durée cumulée de ventilation invasive.** Différence significative (p = 0.007) : la durée médiane est plus longue en période élargie (5.6 jours contre 1.2 jour).
+
+**Durée cumulée de ventilation non invasive.** Différence significative (p < 0.001), en sens inverse de la précédente : la durée médiane est plus longue en période restrictive (50 jours contre 38.4 jours).
+
+**Corticothérapie postnatale tardive (> J10) et dose reçue.** Pas de différence significative, ni pour la fréquence de recours (p = 0.307) ni pour la dose administrée (p = 0.726).
+
+**Pneumothorax (air leaks).** Événement rare dans les deux groupes, sans différence significative (p = 0.383).
+
+**Hémorragie pulmonaire.** Pas de différence significative entre les deux périodes (p = 0.571).
+
+**Hémorragie intraventriculaire sévère (grade 3–4) et/ou leucomalacie périventriculaire.** Différence significative (p = 0.035) : ces complications sévères sont plus fréquentes en période élargie (14 % contre 6.7 %).
+
+**Traitement pharmacologique du canal artériel.** Pas de différence significative (p = 0.610).
+
+**Fermeture mécanique du canal artériel.** Différence significative (p = 0.048) : plus fréquente en période élargie (11.8 % contre 5.5 %).
+
+**Sepsis tardif, entérocolite ulcéro-nécrosante, perforation intestinale isolée.** Aucune différence significative entre les deux périodes pour ces trois complications (p = 0.479, 0.791 et 0.718 respectivement).
+
+**Décès avant la sortie.** Pas de différence significative (p = 0.500).
+
+**Traitement pour rétinopathie du prématuré, parmi les survivants.** Pas de différence significative (p = 1.000) ; événement rare dans les deux groupes (2.6–3.2 %).
+
 ## Facteurs associés à la survie sans DBP
 
-Analyse univariée (Tableau 3) suivie du modèle multivarié ajusté.
+Une première analyse univariée a permis d'identifier les caractéristiques cliniques et périnatales associées à la survie sans DBP à 36 semaines (Tableau 3). Les variables atteignant le seuil conventionnel de significativité ou une simple tendance (p < 0.2) ont ensuite été soumises à un modèle de régression logistique multivariée, avec la période de prophylaxie imposée a priori indépendamment de son résultat univarié.
 
 ```{r tab3-quant}
 render_table_flextable(tab3_quant, "Tableau 3a — Analyse univariée, variables quantitatives")
@@ -171,25 +239,114 @@ render_table_flextable(tab3_quant, "Tableau 3a — Analyse univariée, variables
 render_table_flextable(tab3_qual, "Tableau 3b — Analyse univariée, variables qualitatives")
 ```
 
+### Lecture du Tableau 3
+
+Les deux groupes comparés sont les enfants ayant survécu sans DBP (n = 178) et ceux décédés ou ayant développé une DBP à 36 semaines (n = 123).
+
+**Âge gestationnel à la naissance.** Différence très significative (p < 0.001) : l'âge gestationnel médian est plus élevé chez les enfants survivant sans DBP (26.7 semaines) que chez ceux décédés ou ayant développé une DBP (25.6 semaines). En catégorisant l'âge, 56.1 % des enfants du groupe « décès ou DBP » sont nés avant 26 semaines, contre 32 % dans le groupe « survie sans DBP ».
+
+**Poids de naissance.** Différence très significative (p < 0.001) : poids médian plus élevé chez les survivants sans DBP (865 g contre 720 g).
+
+**Score CRIB.** Différence très significative (p < 0.001) : le score médian, traduisant une plus grande sévérité initiale, est plus élevé dans le groupe « décès ou DBP » (7 contre 4).
+
+**Sexe.** Tendance à une fréquence plus élevée du sexe féminin dans le groupe « survie sans DBP » (53.4 % contre 43.1 %), proche de la significativité (p = 0.079).
+
+**Statut « inborn » et mode d'accouchement.** Aucune différence significative entre les deux groupes (p = 0.794 et p = 0.504 respectivement).
+
+**Grossesse multiple.** Pas de différence significative (p = 0.180), avec une fréquence numériquement plus élevée dans le groupe « décès ou DBP » (26.8 % contre 20.2 %).
+
+**Rupture prématurée des membranes.** Pas de différence significative (p = 0.114).
+
+**Corticothérapie anténatale.** Pas de différence entre les groupes (p = 0.984).
+
+**Retard de croissance intra-utérin (RCIU < 10ᵉ percentile).** Différence significative (p = 0.023) : le RCIU est deux fois plus fréquent dans le groupe « décès ou DBP » (17.1 % contre 8.4 %).
+
+**Doses de surfactant.** Différence très significative (p < 0.001) : l'absence de surfactant est nettement plus fréquente dans le groupe « survie sans DBP » (28.7 % contre 7.3 %), tandis que l'administration de deux doses ou plus est presque trois fois plus fréquente dans le groupe « décès ou DBP » (39.8 % contre 14 %).
+
+**Période de prophylaxie.** Pas de différence significative en analyse univariée (p = 0.189), avec une proportion numériquement plus élevée d'enfants issus de la période restrictive dans le groupe « décès ou DBP » (59.3 %) que dans le groupe « survie sans DBP » (51.7 %). Conformément à la méthodologie prévue, cette variable est intégrée dans le modèle multivarié indépendamment de ce résultat univarié.
+
+### Analyse de corrélation entre les indicateurs de maturité
+
+Avant la construction du modèle multivarié, les relations deux à deux entre l'âge gestationnel à la naissance, le poids de naissance et le score CRIB ont été examinées.
+
+```{r fig-corr-1, fig.cap="Corrélation entre âge gestationnel et poids de naissance"}
+knitr::include_graphics(here::here("results/scatter_pairs1.png"))
+```
+
+```{r fig-corr-2, fig.cap="Corrélation entre âge gestationnel et score CRIB"}
+knitr::include_graphics(here::here("results/scatter_pairs2.png"))
+```
+
+```{r fig-corr-3, fig.cap="Corrélation entre poids de naissance et score CRIB"}
+knitr::include_graphics(here::here("results/scatter_pairs3.png"))
+```
+
+Ces trois indicateurs sont fortement corrélés entre eux, ce qui traduit une redondance d'information attendue : un enfant né plus tôt pèse en général moins et présente un score de sévérité initiale plus élevé. Afin de limiter la colinéarité et l'instabilité des estimations dans le modèle multivarié, seul l'âge gestationnel à la naissance — indicateur le plus directement interprétable en pratique clinique — a été conservé parmi ces trois variables continues.
+
+### Modèle multivarié
+
+Le modèle final inclut l'âge gestationnel à la naissance, le sexe, la grossesse multiple, la rupture prématurée des membranes, le retard de croissance intra-utérin, le nombre de doses de surfactant et la période de prophylaxie. Les résultats sont exprimés en odds ratios ajustés (ORa) pour la survie sans DBP à 36 semaines, avec leur intervalle de confiance à 95 % (Tableau 4).
+
+**Tableau 4 — Régression logistique multivariée : ORa pour la survie sans DBP à 36 semaines**
+
+| Caractéristique | ORa | IC95 % | p |
+|---|---|---|---|
+| Âge gestationnel (par semaine) | 1.80 | [1.40 ; 2.33] | < 0.001 |
+| Sexe — Femme (réf. Homme) | 1.99 | [1.16 ; 3.49] | 0.014 |
+| Grossesse multiple — Oui (réf. Non) | 0.68 | [0.36 ; 1.28] | 0.20 |
+| Rupture prématurée des membranes — Oui (réf. Non) | 1.45 | [0.80 ; 2.65] | 0.20 |
+| RCIU < 10ᵉ percentile — Oui (réf. Non) | 0.37 | [0.15 ; 0.87] | 0.025 |
+| Surfactant — 1 dose (réf. aucune dose) | 0.34 | [0.13 ; 0.76] | 0.013 |
+| Surfactant — ≥ 2 doses (réf. aucune dose) | 0.13 | [0.05 ; 0.33] | < 0.001 |
+| Période — Restrictive (réf. Élargie) | 0.59 | [0.34 ; 1.02] | 0.062 |
+
 ```{r forest-plot, fig.width=9, fig.height=6}
 p
 ```
 
-*Lecture : un point situé à gauche de la ligne verticale (OR < 1) indique un facteur associé à une réduction du risque de décès ou de DBP ; un point en bleu foncé indique une association statistiquement significative (p < 0.05).*
+*Lecture : un point situé à droite de la ligne verticale (OR > 1) indique un facteur associé à une probabilité plus élevée de survie sans DBP ; un point en bleu foncé indique une association statistiquement significative (p < 0.05).*
 
-## Messages clés
+**Âge gestationnel à la naissance.** Chaque semaine de gestation supplémentaire multiplie par 1.80 les chances de survie sans DBP (IC95 % 1.40–2.33 ; p < 0.001). C'est le facteur protecteur le plus robuste identifié dans ce modèle, avec un intervalle de confiance situé entièrement au-dessus de 1.
+
+**Sexe.** Par rapport aux garçons, les filles ont environ deux fois plus de chances de survivre sans DBP (ORa = 1.99 ; IC95 % 1.16–3.49 ; p = 0.014), effet statistiquement significatif après ajustement.
+
+**Retard de croissance intra-utérin.** Un RCIU < 10ᵉ percentile est associé à une réduction d'environ 60 % des chances de survie sans DBP par rapport à l'absence de RCIU (ORa = 0.37 ; IC95 % 0.15–0.87 ; p = 0.025).
+
+**Doses de surfactant.** Comparés aux enfants n'ayant reçu aucun surfactant, ceux ayant reçu une dose ont des chances de survie sans DBP divisées par environ 3 (ORa = 0.34 ; IC95 % 0.13–0.76 ; p = 0.013), et ceux ayant reçu deux doses ou plus par un facteur d'environ 7.5 (ORa = 0.13 ; IC95 % 0.05–0.33 ; p < 0.001). Le besoin en surfactant apparaît comme le marqueur le plus fortement associé au pronostic dans ce modèle, reflétant vraisemblablement la sévérité respiratoire initiale.
+
+**Période de prophylaxie.** La période restrictive est associée à des chances de survie sans DBP réduites d'environ 40 % par rapport à la période élargie (ORa = 0.59 ; IC95 % 0.34–1.02 ; p = 0.062). Cet effet, bien qu'il n'atteigne pas formellement le seuil conventionnel de significativité, s'en approche fortement — la borne supérieure de son intervalle de confiance touchant juste la valeur 1 — et va dans le même sens que les résultats descriptifs (Tableaux 1 et 2), qui suggéraient déjà un profil respiratoire légèrement moins favorable en période restrictive. Ce résultat, à la limite de la significativité statistique, doit être interprété avec prudence.
+
+**Grossesse multiple et rupture prématurée des membranes.** Aucune association indépendante significative avec la survie sans DBP n'est mise en évidence après ajustement pour ces deux variables (ORa = 0.68, p = 0.20 et ORa = 1.45, p = 0.20 respectivement) ; leurs intervalles de confiance recoupent largement la valeur 1.
+
+## Synthèse
 
 ```{r messages-cles, results = "asis"}
 sig_res <- res[res$p.value < 0.05, ]
 
+term_fr <- c(
+  "Gestational age (weeks)"       = "Âge gestationnel (par semaine)",
+  "Sex: Female"                    = "Sexe — Femme",
+  "Multiple pregnancy: Yes"        = "Grossesse multiple — Oui",
+  "PPROM: Yes"                     = "Rupture prématurée des membranes — Oui",
+  "IUGR <10th centile: Yes"        = "RCIU < 10ᵉ percentile — Oui",
+  "Surfactant: One dose"           = "Surfactant — Une dose",
+  "Surfactant: ≥2 doses"          = "Surfactant — ≥ 2 doses",
+  "Prophylaxis period: Restrictive" = "Période — Restrictive"
+)
+
+fmt_p <- function(x) if (x < 0.001) "< 0.001" else sprintf("%.3f", x)
+
 if (nrow(sig_res) == 0) {
-  cat("- Aucun facteur n'est associé de façon statistiquement significative au risque de décès ou de DBP dans ce modèle ajusté.\n")
+  cat("- Aucun facteur n'est associé de façon statistiquement significative à la survie sans DBP dans ce modèle ajusté.\n")
 } else {
   for (i in seq_len(nrow(sig_res))) {
-    sens <- if (sig_res$estimate[i] < 1) "diminue" else "augmente"
+    sens     <- if (sig_res$estimate[i] > 1) "augmente" else "diminue"
+    term_chr <- as.character(sig_res$term[i])
+    label    <- if (term_chr %in% names(term_fr)) term_fr[[term_chr]] else term_chr
     cat(sprintf(
-      "- **%s** %s le risque de décès ou de DBP (OR = %.2f, IC95%% [%.2f–%.2f], p = %.3f)\n",
-      sig_res$term[i], sens, sig_res$estimate[i], sig_res$conf.low[i], sig_res$conf.high[i], sig_res$p.value[i]
+      "- **%s** %s les chances de survie sans DBP (ORa = %.2f, IC95%% [%.2f–%.2f], p %s)\n",
+      label, sens, sig_res$estimate[i], sig_res$conf.low[i], sig_res$conf.high[i],
+      ifelse(sig_res$p.value[i] < 0.001, "< 0.001", paste0("= ", fmt_p(sig_res$p.value[i])))
     ))
   }
 }
