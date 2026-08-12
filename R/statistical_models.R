@@ -26,7 +26,7 @@ lab_quant3 <- list(
   pd_n     = "Birthweight (g)",
   crib     = "Crib")
 
-table_to_word(df1,
+tab3_quant <- table_to_word(df1,
               quant_vars = vars_quant3,
               labels = lab_quant3,
               group_var = "dec_ou_dbp_36sa",
@@ -46,7 +46,7 @@ vars_qual_lab3 <- list(
   nb_surf       = "N doses surfactant, n (%)",
   periode       = "Period")
 
-table_to_word(df1,
+tab3_qual <- table_to_word(df1,
               qual_vars = vars_qual3,
               labels = vars_qual_lab3,
               group_var = "dec_ou_dbp_36sa",

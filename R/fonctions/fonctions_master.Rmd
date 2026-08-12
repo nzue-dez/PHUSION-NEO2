@@ -77,6 +77,9 @@ date: "2025-12-05"
 #   export_decisionnel_logistique — Tableau décisionnel logistique → Word (GT)
 #   export_bootstrap_logistic  — OR bootstrap → Word (flextable)
 #
+# EXPORT VERS RAPPORT HTML (R MARKDOWN)
+#   kpi_card                   — Carte indicateur (KPI) HTML pour rapport.Rmd
+#
 # MACHINE LEARNING
 #   compute_metrics            — Métriques de classification binaire (accuracy, F1…)
 #   create_folds_stratified    — K-folds stratifiés pour validation croisée
@@ -109,6 +112,7 @@ if(!require(flextable)) install.packages("flextable")
 if(!require(openxlsx))  install.packages("openxlsx")  # requis par missing_plot (export Excel)
 if(!require(pROC))      install.packages("pROC")       # requis par plot_roc_val_test
 if(!require(glmnet))    install.packages("glmnet")     # requis par stability_selection
+if(!require(htmltools)) install.packages("htmltools")   # requis par kpi_card
 
 library(nortest)   # pour le test de normalité d'Anderson Darling
 library(officer)

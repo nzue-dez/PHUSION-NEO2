@@ -3,22 +3,202 @@ title: "PHUSION NEO2 — Rapport d'analyse"
 author: "D. Kouadio"
 date: "`r Sys.Date()`"
 output:
-  html_document:
+  word_document:
     toc: true
-    toc_float: true
-    theme: flatly
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+# ── Exécution du pipeline existant (analyse.R), sans le rendu graphique ────────
+# On réutilise telles quelles les fonctions et scripts du projet : aucune
+# logique statistique n'est dupliquée ici, seule la mise en forme pour un
+# lecteur médecin est ajoutée.
 source(here::here("R/load_functions.R"))
 source(here::here("R/data_management.R"))
+source(here::here("R/descriptive.R"))
+source(here::here("R/missing_analysis.R"))
+source(here::here("R/statistical_models.R"))
+source(here::here("R/visualization.R"))
+
+# ── Aide de mise en forme (propre à ce rapport, pas à la bibliothèque partagée) ─
+# Rendu flextable d'un tableau produit par table_to_word() : reprend le même
+# repérage lignes parent/enfant que la version Word exportée, sans recalculer
+# aucune statistique (les stats viennent déjà de table_to_word()).
+render_table_flextable <- function(df_out, caption = NULL) {
+  parent_rows <- which(df_out$Variable != "")
+  sig_rows    <- which(suppressWarnings(as.numeric(df_out$`p-value`)) < 0.05)
+
+  ft <- flextable::flextable(df_out)
+  ft <- flextable::fontsize(ft, size = 9, part = "all")
+  ft <- flextable::bold(ft, i = parent_rows, bold = TRUE)
+  ft <- flextable::bg(ft, i = parent_rows, bg = "#F2F2F2")
+  ft <- flextable::padding(ft, i = setdiff(seq_len(nrow(df_out)), parent_rows),
+                           j = "Modalité", padding.left = 20)
+  if (length(sig_rows) > 0) {
+    ft <- flextable::color(ft, i = sig_rows, j = "p-value", color = "#C00000")
+    ft <- flextable::bold(ft, i = sig_rows, j = "p-value", bold = TRUE)
+  }
+  ft <- flextable::bold(ft, part = "header", bold = TRUE)
+  ft <- flextable::bg(ft, part = "header", bg = "#1F3864")
+  ft <- flextable::color(ft, part = "header", color = "white")
+  ft <- flextable::autofit(ft)
+  if (!is.null(caption)) ft <- flextable::set_caption(ft, caption)
+  ft
+}
 ```
 
-## Population
+## Résumé exécutif
 
-## Statistiques descriptives
+```{r kpi-exec}
+n_total   <- nrow(df1)
+n_periode <- table(df1$periode)
 
-## Modèles
+surv_pct <- round(100 * prop.table(table(df1$Surv_without_dbp36sa, df1$periode), margin = 2)["1", ], 1)
 
-## Conclusion
+# Ligne du modèle multivarié correspondant à la période de prophylaxie
+res_periode <- res[grepl("Prophylaxis period", res$term), ]
+
+kpi_df <- data.frame(
+  Indicateur = c(
+    "Patients inclus",
+    paste0("Effectif — ", names(n_periode)[1]),
+    paste0("Effectif — ", names(n_periode)[2]),
+    paste0("Survie sans DBP — ", names(n_periode)[1]),
+    paste0("Survie sans DBP — ", names(n_periode)[2])
+  ),
+  Valeur = c(
+    as.character(n_total),
+    as.character(n_periode[1]),
+    as.character(n_periode[2]),
+    paste0(surv_pct[1], " %"),
+    paste0(surv_pct[2], " %")
+  ),
+  stringsAsFactors = FALSE
+)
+
+if (nrow(res_periode) == 1) {
+  kpi_df <- rbind(kpi_df, data.frame(
+    Indicateur = "OR ajusté — période restrictive (vs. non restrictive)",
+    Valeur = sprintf("%.2f  [IC95%% %.2f–%.2f], p = %.3f",
+                     res_periode$estimate, res_periode$conf.low, res_periode$conf.high, res_periode$p.value)
+  ))
+}
+
+ft_kpi <- flextable::flextable(kpi_df)
+ft_kpi <- flextable::bold(ft_kpi, j = "Indicateur")
+ft_kpi <- flextable::bold(ft_kpi, part = "header", bold = TRUE)
+ft_kpi <- flextable::bg(ft_kpi, part = "header", bg = "#1F3864")
+ft_kpi <- flextable::color(ft_kpi, part = "header", color = "white")
+if (nrow(res_periode) == 1 && res_periode$p.value < 0.05) {
+  ft_kpi <- flextable::color(ft_kpi, i = nrow(kpi_df), j = "Valeur", color = "#C00000")
+  ft_kpi <- flextable::bold(ft_kpi, i = nrow(kpi_df), j = "Valeur", bold = TRUE)
+}
+ft_kpi <- flextable::autofit(ft_kpi)
+ft_kpi
+```
+
+```{r msg-exec, results = "asis"}
+if (nrow(res_periode) == 1) {
+  sens <- if (res_periode$estimate < 1) "réduit" else "augmenté"
+  sig  <- if (res_periode$p.value < 0.05) "de façon statistiquement significative" else "sans que la différence soit statistiquement significative"
+  cat(sprintf(
+    "**Message clé :** après ajustement sur les autres facteurs, le risque de décès ou de DBP à 36 SA est %s en période de prophylaxie restrictive (OR = %.2f, IC95%% [%.2f–%.2f]), %s (p = %.3f).",
+    sens, res_periode$estimate, res_periode$conf.low, res_periode$conf.high, sig, res_periode$p.value
+  ))
+}
+```
+
+## Population étudiée
+
+Caractéristiques des patients inclus, comparées entre les deux périodes de prophylaxie (Tableau 1).
+
+```{r tab1-quant}
+render_table_flextable(tab1_quant, "Tableau 1a — Caractéristiques quantitatives")
+```
+
+```{r tab1-qual}
+render_table_flextable(tab1_qual, "Tableau 1b — Caractéristiques qualitatives")
+```
+
+```{r fig-box-quant, fig.width=10, fig.height=4}
+box_quant_by_periode$plot
+```
+
+## Qualité des données
+
+```{r missing-summary}
+render_table_flextable(
+  data.frame(
+    Variable = missing_per_var$Variable,
+    Modalité = "",
+    n = "",
+    Total = paste0(missing_per_var$Donnees_manquantes, " (", missing_per_var$Pourcentage_manquant, ")"),
+    Test = "", `p-value` = "",
+    check.names = FALSE
+  ),
+  "Données manquantes sur les variables retenues pour l'analyse univariée"
+)
+```
+
+La variable `crib` présente le taux de données manquantes le plus élevé ; son caractère manquant est lié à la période d'inclusion (MAR conditionnel), une exclusion a donc été envisagée avant la modélisation multivariée (cf. `statistical_models.R`).
+
+## Résultats cliniques
+
+Critères de jugement et complications observés, comparés entre les deux périodes (Tableau 2).
+
+```{r fig-bar-outcomes, fig.width=10, fig.height=7}
+bar_outcomes_by_periode
+```
+
+```{r tab2-quant}
+render_table_flextable(tab2_quant, "Tableau 2a — Critères de jugement quantitatifs")
+```
+
+```{r tab2-qual}
+render_table_flextable(tab2_qual, "Tableau 2b — Critères de jugement qualitatifs")
+```
+
+## Facteurs associés à la survie sans DBP
+
+Analyse univariée (Tableau 3) suivie du modèle multivarié ajusté.
+
+```{r tab3-quant}
+render_table_flextable(tab3_quant, "Tableau 3a — Analyse univariée, variables quantitatives")
+```
+
+```{r tab3-qual}
+render_table_flextable(tab3_qual, "Tableau 3b — Analyse univariée, variables qualitatives")
+```
+
+```{r forest-plot, fig.width=9, fig.height=6}
+p
+```
+
+*Lecture : un point situé à gauche de la ligne verticale (OR < 1) indique un facteur associé à une réduction du risque de décès ou de DBP ; un point en bleu foncé indique une association statistiquement significative (p < 0.05).*
+
+## Messages clés
+
+```{r messages-cles, results = "asis"}
+sig_res <- res[res$p.value < 0.05, ]
+
+if (nrow(sig_res) == 0) {
+  cat("- Aucun facteur n'est associé de façon statistiquement significative au risque de décès ou de DBP dans ce modèle ajusté.\n")
+} else {
+  for (i in seq_len(nrow(sig_res))) {
+    sens <- if (sig_res$estimate[i] < 1) "diminue" else "augmente"
+    cat(sprintf(
+      "- **%s** %s le risque de décès ou de DBP (OR = %.2f, IC95%% [%.2f–%.2f], p = %.3f)\n",
+      sig_res$term[i], sens, sig_res$estimate[i], sig_res$conf.low[i], sig_res$conf.high[i], sig_res$p.value[i]
+    ))
+  }
+}
+```
+
+## Annexe technique (validité du modèle)
+
+*Section réservée aux lecteurs biostatisticiens — diagnostics du modèle multivarié (résidus, leviers, distance de Cook, surdispersion).*
+
+```{r model-diagnostics, echo=FALSE}
+source(here::here("R/model_diagnostics.R"), echo = TRUE, print.eval = TRUE)
+```

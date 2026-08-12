@@ -14,6 +14,9 @@ date: "2025-12-05"
 #   export_estimates_table     — Tableau d'estimations (OR, IC, p-value) → Word
 #   export_decisionnel_logistique — Tableau décisionnel logistique → Word (GT)
 #   export_bootstrap_logistic  — OR bootstrap → Word (flextable)
+#
+# EXPORT VERS RAPPORT HTML (R MARKDOWN)
+#   kpi_card                   — Carte indicateur (KPI) HTML pour rapport.Rmd
 # =============================================================================
 ```
 
@@ -892,6 +895,110 @@ export_bootstrap_logistic <- function(
   # Export
   print(doc, target = file_name)
 
+}
+```
+
+
+```{r}
+###############################################################################
+# Fonction : kpi_card
+###############################################################################
+#
+# Description :
+# Cette fonction génère une "carte indicateur" (KPI card) au format HTML,
+# destinée à être affichée dans un rapport R Markdown (`output: html_document`).
+# Elle permet de mettre en avant un chiffre clé (effectif, pourcentage,
+# odds ratio...) accompagné d'un libellé et, éventuellement, d'un sous-titre
+# explicatif — utile pour des rapports destinés à des lecteurs non-statisticiens
+# (médecins, cliniciens).
+#
+# ---------------------------------------------------------------------------
+# Arguments :
+# ---------------------------------------------------------------------------
+#
+# value :
+#   Valeur principale à mettre en avant (chiffre ou chaîne déjà formatée).
+#   Exemple : 310, "68 %", "OR = 0.42"
+#
+# label :
+#   Libellé court décrivant l'indicateur (ex : "Patients inclus").
+#
+# subtitle :
+#   Texte complémentaire optionnel (ex : "IC95% [0.24-0.71]").
+#
+# color :
+#   Couleur d'accent de la carte (bordure gauche + valeur). Accepte tout
+#   nom ou code couleur valide en CSS (ex : "steelblue", "#1F3864").
+#
+# ---------------------------------------------------------------------------
+# Fonctionnement :
+# ---------------------------------------------------------------------------
+#
+# - Construit un bloc HTML (via `htmltools::div`/`tags`) avec une bordure
+#   de couleur, la valeur en grand, le libellé et le sous-titre optionnel.
+# - Pensée pour être appelée dans un chunk R Markdown avec `results = "asis"`
+#   (ou en enveloppant plusieurs cartes dans une grille flexbox via
+#   `htmltools::tagList`) afin de composer une ligne de cartes indicateurs.
+#
+# ---------------------------------------------------------------------------
+# Sortie :
+# ---------------------------------------------------------------------------
+#
+# Un objet `shiny.tag` (HTML) affichable directement dans un document
+# R Markdown HTML.
+#
+# ---------------------------------------------------------------------------
+# Dépendances :
+# ---------------------------------------------------------------------------
+#
+#   - htmltools
+#
+# ---------------------------------------------------------------------------
+# Remarques :
+# ---------------------------------------------------------------------------
+#
+# - Ne fonctionne que dans un document de sortie HTML (`html_document`,
+#   `html_notebook`...). Sans effet dans un document Word/PDF.
+# - Pour afficher plusieurs cartes côte à côte, les regrouper avec
+#   `htmltools::tagList()` ou `htmltools::div(style = "display:flex; gap:16px;", ...)`
+#   dans un chunk `results = "asis"`.
+#
+# Exemple d'utilisation :
+#   kpi_card(value = 310, label = "Patients inclus")
+#   kpi_card(value = "0.42", label = "OR ajusté", subtitle = "IC95% [0.24-0.71]", color = "#C00000")
+#
+###############################################################################
+
+if (!require(htmltools)) install.packages("htmltools")
+library(htmltools)
+
+kpi_card <- function(
+    value,
+    label,
+    subtitle = NULL,
+    color = "steelblue"
+){
+
+  htmltools::div(
+    style = sprintf(
+      "border-left: 5px solid %s; background: #F8F9FA; border-radius: 6px; padding: 12px 16px; min-width: 160px;",
+      color
+    ),
+    htmltools::div(
+      style = sprintf("font-size: 1.8em; font-weight: 700; color: %s;", color),
+      value
+    ),
+    htmltools::div(
+      style = "font-size: 0.95em; color: #333333;",
+      label
+    ),
+    if (!is.null(subtitle)) {
+      htmltools::div(
+        style = "font-size: 0.8em; color: #6B7280; margin-top: 2px;",
+        subtitle
+      )
+    }
+  )
 }
 ```
 

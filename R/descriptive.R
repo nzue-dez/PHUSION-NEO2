@@ -10,7 +10,7 @@ lab_quant1 <- list(
   pd_n     = "Birthweight (g)",
   crib     = "Crib")
 
-table_to_word(df1,
+tab1_quant <- table_to_word(df1,
               quant_vars = vars_quant1,
               labels = lab_quant1,
               group_var = "periode",
@@ -31,7 +31,7 @@ vars_qual_lab1 <- list(
   nb_surf      = "N doses surfactant, n (%)",
   prmloc       = "N receiving prophylaxis hydrocortisone, n (%)")
 
-table_to_word(df1,
+tab1_qual <- table_to_word(df1,
               qual_vars = vars_qual1,
               labels = vars_qual_lab1,
               group_var = "periode",
@@ -44,7 +44,7 @@ lab_quant2 <- list(
   somcu_vni        = "Cumulated duration of non-invasive ventilation (d)",
   cortico_gene_doz = "Dose of postnatal steroids (mg/kg)")
 
-table_to_word(df1,
+tab2_quant <- table_to_word(df1,
               quant_vars = vars_quant2,
               labels = lab_quant2,
               group_var = "periode",
@@ -74,7 +74,7 @@ conditions = list(
   dbp_36sa  = quote(dec_s == "Non")
 )
 
-table_to_word(df1,
+tab2_qual <- table_to_word(df1,
               qual_vars = vars_qual2,
               labels = lab_qual2,
               group_var = "periode",
