@@ -57,7 +57,15 @@ Le détail complet des analyses (tableaux descriptifs, analyse univariée, corr�
 ```
 PHUSION NEO2/
 ├── R/
-│   ├── load_functions.R      # Packages + bibliothèque personnelle
+│   ├── fonctions/             # Bibliothèque personnelle de fonctions biostat (autonome, versionnée)
+│   │   ├── charger_fonctions.R  # Point d'entrée : source tous les modules ci-dessous
+│   │   ├── 01_utilitaires.Rmd
+│   │   ├── 02_qualite_manquantes.Rmd
+│   │   ├── 03_statistiques_viz.Rmd
+│   │   ├── 04_modelisation.Rmd
+│   │   ├── 05_export.Rmd
+│   │   └── 06_survie.Rmd
+│   ├── load_functions.R      # Packages + chargement de R/fonctions/
 │   ├── data_management.R     # Import, contrôle qualité, nettoyage, recodage, variable dépendante  [Étape 2]
 │   ├── descriptive.R         # Tableau 1 (population générale), Tableaux 2-3 (périodes) [Étape 3]
 │   ├── missing_analysis.R    # Taux de manquants, patterns, mécanisme (MAR/MCAR/MNAR)   [Étapes 4-5]
@@ -71,14 +79,19 @@ PHUSION NEO2/
 ├── figures/                  # Graphiques générés (non versionnés)
 ├── results/                  # Résultats exportés (non versionnés)
 ├── analyse.R                 # Script principal
-├── rapport.Rmd               # Rapport final
+├── rapport.Rmd               # Rapport final (source R Markdown)
+├── rapport.docx              # Rapport final (rendu Word)
+├── Dockerfile / .dockerignore # Image reproductible (rocker/tidyverse:4.5.2 + renv::restore())
+├── renv.lock                 # Versions figées des packages
 └── README.md
 ```
 
 ## Chargement des fonctions
 
+La bibliothèque personnelle de fonctions biostat est autonome et versionnée dans `R/fonctions/` (elle ne dépend plus d'un chemin externe au projet). Elle est chargée automatiquement par `R/load_functions.R`, elle-même appelée en première étape de `analyse.R` :
+
 ```r
-source("/Users/kouadio/Desktop/DOSSIERS BUREAU/ENSEMBLE_FONCTIONS/charger_fonctions.R")
+source(here::here("R/load_functions.R"))  # charge R/fonctions/charger_fonctions.R + packages du projet
 ```
 
 ## Note confidentialité
@@ -118,3 +131,9 @@ source("analyse.R") # lance toute l'analyse dans l'ordre
 
 ### 4. Résultats
 Les exports (tableaux Word, figures) se trouvent dans `results/`
+
+### 5. Régénérer le rapport narratif
+Le rapport final (`rapport.docx`) est produit à partir de `rapport.Rmd`, qui réexécute lui-même le pipeline d'analyse :
+```r
+rmarkdown::render("rapport.Rmd")
+```
