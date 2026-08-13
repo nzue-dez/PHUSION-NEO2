@@ -73,7 +73,7 @@ library(glmnet)    # Elastic Net dans stability_selection
 ##########################################################################################################################
 # Fonction (14)
 # ------------------------------------------------------------------
-# Fonction : var_chr
+# Fonction : var_chr  [n°1]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction identifie les variables de type caractère dans un
@@ -105,7 +105,7 @@ var_chr <- function(data) names(Filter(is.character, data))
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : var_factor
+# Fonction : var_factor  [n°2]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction identifie les variables de type factor dans un
@@ -139,7 +139,7 @@ var_factor <- function(data) names(Filter(is.factor, data))
 ##########################################################################################################################
 # Fonction (15)
 # ------------------------------------------------------------------
-# Fonction : var_num
+# Fonction : var_num  [n°3]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction identifie les variables numériques dans un data.frame.
@@ -173,7 +173,7 @@ var_num <- function(data) names(Filter(is.numeric, data))
 ##########################################################################################################################
 # Fonction (16)
 # ------------------------------------------------------------------
-# Fonction : transform_to_numeric
+# Fonction : transform_to_numeric  [n°4]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction convertit un ensemble de variables d’un data.frame
@@ -224,6 +224,7 @@ transform_to_numeric <- function(data, vars){
 # - type : type recherché (ex : "character", "numeric", "logical", "POSIXct", "Date")
 # Retour :
 # - vecteur contenant les noms des variables correspondant au type spécifié
+# [n°5]
 get_vars_type <- function(df, type) {
   names(df)[sapply(df, function(x) inherits(x, type))]
 }
@@ -233,7 +234,7 @@ get_vars_type <- function(df, type) {
 
 ```{r}
 # -------------------------------------------------------------------------
-# Fonction : convert_posixct_to_date
+# Fonction : convert_posixct_to_date  [n°6]
 # -------------------------------------------------------------------------
 # Objectif :
 # Cette fonction permet de convertir des variables de type POSIXct
@@ -310,6 +311,7 @@ convert_posixct_to_date <- function(df, format = "%Y-%m-%d") {
 # )
 #
 # -------------------------------------------------------------------------
+# [n°7]
 get_vars_pattern <- function(vars, start = NULL, end = NULL, contain = NULL) {
   
   cond_start <- if (!is.null(start)) {
@@ -376,6 +378,7 @@ get_vars_pattern <- function(vars, start = NULL, end = NULL, contain = NULL) {
 #/ Cette fonction est utile pour non seulement convertir des variables en qualitatives mais aussi d'allouer de manière explicite des labels aux différentes modalités de ses variables, si l'on le souhaite.
 # Ex. Supposons une variable quantitative ou caractère, v1, contenue dans "vars" (vars <- c("v1")). On sait de plus que v1 ne prend que deux valeurs 0 et 1 (v1 <- c(0,1)) si quantitative. Le "labels_list" associé est le vecteur
 #/ c <- c("Non","Oui"). L'attribution d'étiquête label est réalisé da,s l'ordre c'est-à-dire que "Non" remplace 0 et "Oui" remplace 1.
+# [n°8]
 transform_to_factor <- function(data, vars, labels_list = NULL) { 
   
   for (v in vars) {
@@ -454,6 +457,7 @@ transform_to_factor <- function(data, vars, labels_list = NULL) {
 # Auteur : [D. KOUADIO]
 # ------------------------------------------------------------
 
+# [n°9]
 standardize_data <- function(data, denom = c("n-1", "n")) {
   
   denom <- match.arg(denom)
@@ -522,6 +526,7 @@ standardize_data <- function(data, denom = c("n-1", "n")) {
 # - Si une variable a un écart-type nul, une division par zéro peut survenir
 # - Utile pour analyses multivariées (ACP, régression, clustering, etc.)
 # ------------------------------------------------------------------
+# [n°10]
 standardize_vars <- function(data, vars) {
   
   stopifnot(all(vars %in% names(data)))
@@ -602,6 +607,7 @@ standardize_vars <- function(data, vars) {
 #
 # Auteur : [D. KOUADIO]
 # ------------------------------------------------------------
+# [n°11]
 remove_obs_multi_vars <- function(
   df,
   conditions,
@@ -689,7 +695,7 @@ remove_obs_multi_vars <- function(
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : get_variable_positions
+# Fonction : get_variable_positions  [n°12]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction retourne la position (indice de colonne) de chaque variable
@@ -749,7 +755,7 @@ get_variable_positions <- function(data, vars) {
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : select_between
+# Fonction : select_between  [n°13]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction sélectionne un ensemble de colonnes consécutives dans
@@ -838,6 +844,7 @@ select_between <- function(data, start_var, end_var, return_names = FALSE) {
 # - drop = FALSE garantit que le retour est un data.frame même si une seule variable est sélectionnée
 # - Si aucune variable ne correspond aux critères, un warning est généré
 # ------------------------------------------------------------------
+# [n°14]
 select_vars <- function(
   data,
   patterns_list,
@@ -945,7 +952,7 @@ select_vars <- function(
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : check_vars_table
+# Fonction : check_vars_table  [n°15]
 # ------------------------------------------------------------------
 # Description :
 # Cette fonction vérifie la présence d'une liste de variables dans un data.frame
@@ -997,7 +1004,7 @@ check_vars_table <- function(data, vars) {
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : filter_by_pattern_multi
+# Fonction : filter_by_pattern_multi  [n°16]
 # ------------------------------------------------------------------
 # Description :
 # Filtre un data.frame en recherchant plusieurs motifs dans une variable texte.
@@ -1066,7 +1073,7 @@ filter_by_pattern_multi <- function(
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : filter_by_two_patterns
+# Fonction : filter_by_two_patterns  [n°17]
 # ------------------------------------------------------------------
 # Description :
 # Filtre un data.frame en recherchant simultanément un motif dans deux variables texte.
@@ -1136,7 +1143,7 @@ filter_by_two_patterns <- function(
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : check_and_extract
+# Fonction : check_and_extract  [n°18]
 # ------------------------------------------------------------------
 # Description :
 # Vérifie la présence d'identifiants dans un data.frame et extrait
@@ -1182,7 +1189,7 @@ check_and_extract <- function(data, ids,
 
 ```{r}
 # ==============================================================
-# Fonction : replace_char_multiple
+# Fonction : replace_char_multiple  [n°19]
 # ==============================================================
 # Description :
 # Permet de remplacer des valeurs dans plusieurs colonnes d'un data.frame,
@@ -1392,6 +1399,7 @@ replace_char_multiple <- function(
 #       - Si return_table = TRUE : data.frame avec colonne, detected, matches
 #       - Sinon : liste filtrée des colonnes détectées avec leurs matches
 # ==============================================================
+# [n°20]
 detect_vars_with_value_patterns <- function(
   data,
   rules,

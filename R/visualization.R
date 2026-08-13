@@ -6,7 +6,7 @@
 
 # Comparaison des variables quantitatives entre les deux périodes de prophylaxie
 # (réutilise plot_box_points, déjà présente dans la bibliothèque de fonctions)
-box_quant_by_periode <- plot_box_points(
+box_quant_by_periode <- plot_box_points(  # [n°37]
   df1,
   x_var   = "periode",
   y_vars  = vars_quant1,
@@ -23,12 +23,8 @@ box_quant_by_periode$plot <- box_quant_by_periode$plot &
   theme(axis.text.x = element_text(angle = 20, hjust = 1, size = 8))
 
 
-# ------------------------------------------------------------------
-# Taux des critères de jugement (Tableau 2) par période de prophylaxie
-# ------------------------------------------------------------------
-# Reprend les mêmes variables/labels/conditions que le Tableau 2 (descriptive.R),
-# mais sous forme de graphique en barres pour une lecture visuelle rapide des
-# principaux indicateurs cliniques (décès, DBP, complications) par période.
+# Taux des critères de jugement (Tableau 2) par période -----------------
+# Mêmes variables/labels/conditions que le Tableau 2, en graphique en barres.
 #
 # IMPORTANT — dépendance implicite : `conditions` et `lab_qual2` ne sont PAS
 # définis dans ce fichier. Ils sont créés dans R/descriptive.R (Tableau 2) et

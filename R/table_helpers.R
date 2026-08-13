@@ -80,7 +80,7 @@ merged_desc_table <- function(df, group_var, quant_vars = NULL, qual_vars = NULL
       n_miss <- sum(is.na(x))
       stats_quant <- if (n_miss > 0) c(stat, "na") else stat
 
-      tt <- table_to_word(
+      tt <- table_to_word(  # [n°56]
         df,
         group_var     = group_var,
         quant_vars    = v,
@@ -96,7 +96,7 @@ merged_desc_table <- function(df, group_var, quant_vars = NULL, qual_vars = NULL
   }
 
   if (!is.null(qual_vars)) {
-    tt <- table_to_word(
+    tt <- table_to_word(  # [n°56]
       df,
       group_var  = group_var,
       qual_vars  = qual_vars,

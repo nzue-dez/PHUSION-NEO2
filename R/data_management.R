@@ -11,10 +11,10 @@ data <- readxl::read_excel(here("data/raw/donnees_phuneo.xlsx"))
 Message <- sprintf("La base contient %d variables dans notre base", dim(data)[2])
 cat(Message)
 
-# On écarte de l'étude ces trois variables non déterminantes 
+# Variables non déterminantes écartées
 data <- data %>% select(-TERME_JOURS,-TERME_SEM)
 
-# On restreint la population aux nouveau-nés dont l'âge gestationnel (AG) est inférieur ou égal à 28 
+# Population : AG ≤ 28 SA
 df1 <- data %>% filter((TERME_CALCUL<=28) == TRUE)
 
 # Dictionnaire des variables
@@ -175,16 +175,12 @@ Vars = c("DATE_DDN","TERME_CALCUL","SEXE","INBORN_OUTBORN","POIDS_DDN","TAILLE_D
          "Cortisol naissance (nmol/L)")
 
 # Extraction des positions des variables du vecteur "Vars"
-get_variable_positions(df1, Vars) # (C'est l'une des fonctions incluses dans load_functions)
+get_variable_positions(df1, Vars)  # [n°12]
 
 
-# Renomme les variables pour faciliter leur manipulation.
-# IMPORTANT : le renommage se fait par CORRESPONDANCE DE NOM (dplyr::rename),
-# pas par position -- contrairement à `colnames(df1)[2:37] <- c(...)`, cette
-# approche est robuste à un changement de l'ordre des colonnes dans le fichier
-# source (data/raw/donnees_phuneo.xlsx) : si un nom de colonne attendu (Vars,
-# ci-dessus) n'existe pas dans df1, R lève une erreur explicite au lieu de
-# renommer silencieusement la mauvaise colonne.
+# Renommage PAR NOM (dplyr::rename), pas par position : robuste si l'ordre
+# des colonnes change dans le fichier source -- erreur explicite plutôt que
+# renommage silencieux d'une mauvaise colonne.
 nouveaux_noms <- c("date_naiss", "term_cal", "sex", "inborn_status", "pd_n",
                     "tll_n", "pc_n", "acc", "gr_mult", "rpde", "beta_sone",
                     "rciu", "nb_surf", "pneu_tho", "hemo_pulm", "cnl_ttt",
@@ -202,27 +198,25 @@ rename_map <- setNames(Vars, nouveaux_noms)
 df1 <- df1 %>% dplyr::rename(!!!rename_map)
 
 
-# Contrôle qualité --------------------------------------------------------
-# plot_range_check()      : détection des valeurs aberrantes (variables quantitatives)
-# check_dominance_qual()  : détection des classes déséquilibrées (variables qualitatives)
-# (appliquées plus bas, une fois les variables qualitatives/quantitatives d'intérêt définies)
+# Contrôle qualité (appliqué plus bas) : plot_range_check() pour les valeurs
+# aberrantes, check_dominance_qual() pour les classes déséquilibrées
 
 
-# Recherche des valeurs "DM" et "NA" dans la base. (À ce stade, les "NA" ne sont pas encore reconnus par le logiciel comme étant des données manquantes; DM représente, en fait, des données manquantes)
-## règle de la recherche
+# Recherche des valeurs "DM"/"NA" (données manquantes, pas encore reconnues comme telles à ce stade)
+## Règle de la recherche
 rules = list(
   list(values = "DM", types = "exact", label = "egal_DM"),
   list(values = "NA", types = "exact", label = "egal_NA")
 )
 # On lance la recherche
-detect_vars_with_value_patterns(df1, rules = rules) #  (C'est l'une des fonctions incluses dans load_functions)
+detect_vars_with_value_patterns(df1, rules = rules)  # [n°20]
 
 # Remplacement
-## On met les variables; dbp_36sa et chir_lser en caractère pour faciliter le remplacement 
+## dbp_36sa / chir_lser en caractère pour faciliter le remplacement
 df1$dbp_36sa  <- as.character(df1$dbp_36sa)
 df1$chir_lser <- as.character(df1$chir_lser)
 
-## Instruction de remplacement
+## Instructions de remplacement
 replacements = list(
   tll_n            = list(char = "DM", replacement = NA, convert_numeric = TRUE),
   rpde             = list(char = "DM", replacement = NA, convert_numeric = FALSE),
@@ -232,18 +226,18 @@ replacements = list(
   crib             = list(char = "DM", replacement = NA, convert_numeric = TRUE),
   cortico_gene_doz = list(char = "DM", replacement = NA, convert_numeric = TRUE),
   somcu_vni        = list(char = "DM", replacement = NA, convert_numeric = TRUE),
-  dbp_36sa         = list(char = "9",  replacement = NA, convert_numeric = TRUE),  # 9 = données non disponibles (à voir plus tard, notamment dans la modélisation, si on peut les considérer comme de "réelles données manquantes")
+  dbp_36sa         = list(char = "9",  replacement = NA, convert_numeric = TRUE),  # 9 = non disponible (à requalifier en NA "réel" au moment de la modélisation)
   chir_lser        = list(char = "9",  replacement = NA, convert_numeric = TRUE),  # idem
   cortisol_n       = list(char = "DM", replacement = NA, convert_numeric = TRUE)
 )
 
 ## On lance la procédure de remplacement
-df1 <- replace_char_multiple(df1, replacements = replacements) # (C'est l'une des fonctions incluses dans load_functions)
+df1 <- replace_char_multiple(df1, replacements = replacements)  # [n°19]
 
 
-# Création de la variable période à partir de l'ordre d'enregistrement des patients (ici, on connait cet ordre)
-## Période 1 (lignes 1–136)   : prophylaxie non restrictive (sans/avec PREMILOC)
-## Période 2 (lignes 137–310) : prophylaxie restrictive (critères d'exclusion ajoutés)
+# Variable période, déduite de l'ordre d'enregistrement des patients (connu)
+## Période 1 (lignes 1–136)   : prophylaxie non restrictive
+## Période 2 (lignes 137–310) : prophylaxie restrictive
 df1$periode <- factor(ifelse(1:nrow(df1) <= 136, 1,
                              ifelse(1:nrow(df1) <= 310, 2, NA)))
 
@@ -278,8 +272,8 @@ df1$dec_s          <- factor(df1$dec_s,          levels = c(0,1),     labels = c
 df1$periode        <- factor(df1$periode,        levels = c(1,2),     labels = c("Unrestrictive prophylaxis period","Restrictive prophylaxis period"))
 
 
-# On forme des sous groupes à partir du terme de naissance (calculé) des nouveau-nés préma. 
-## Découpage indiqué par le medecin ; [minimum(terme calculé)=23.3;26] et (26;maximum(terme calculé)=28] 
+# Sous-groupes par terme de naissance, découpage indiqué par le médecin
+## [min(terme calculé)=23.3 ; 26] et (26 ; max(terme calculé)=28]
 df1 <- df1 |> mutate(grp_term_cal = cut(
   term_cal,
   breaks = c(min(df1$term_cal), 25.99, max(df1$term_cal)),
@@ -289,8 +283,7 @@ df1 <- df1 |> mutate(grp_term_cal = cut(
 ))
 
 
-# Construction de la variable dépendante: survie sans DBP à 36 SA (Surv_without_dbp36sa)
-# Si dec_ou_dbp_36sa = Non => Surv_without_dbp36sa = Oui; Si dec_ou_dbp_36sa = Oui => Surv_without_dbp36sa = Non;
+# Variable dépendante : survie sans DBP à 36 SA (inverse de dec_ou_dbp_36sa)
 df1 <- df1 %>%
   mutate(
     Surv_without_dbp36sa = case_when(
@@ -303,25 +296,20 @@ df1 <- df1 %>%
 # On utilise une version qualitative chiffrée pour faciliter son intégration dans des modèles
 df1$Surv_without_dbp36sa <- factor(df1$Surv_without_dbp36sa, levels = c("Non","Oui"), labels = c("0","1"))
 
-# --------------------------------------------------------- contrôle de qualité ---------------------------------------------
+# Contrôle qualité ----------------------------------------------------------
 vars_qual1 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","prmloc")
 vars_qual2 = c("dec_ou_dbp_36sa","dec_36sa","dbp_36sa","cortico_tard","pneu_tho","hemo_pulm",
                "hiv_plus_lpmv","cnl_ttt","ca_opr","noso","ecun","perfo_isl","dec_s","chir_lser")
 vars_qual3 = c("grp_term_cal","sex","inborn_status","acc","gr_mult","rpde","beta_sone","rciu","nb_surf","periode")
 
 ## Variables qualitatives
-check_equilib_qual1 <- check_dominance_qual(df1, vars = vars_qual1, ncol = 3, png_path = "results/check_equilib_qual1.png")
-check_equilib_qual2 <- check_dominance_qual(df1, vars = vars_qual2, ncol = 3, png_path = "results/check_equilib_qual2.png")
-check_equilib_qual3 <- check_dominance_qual(df1, vars = vars_qual3, ncol = 3, png_path = "results/check_equilib_qual3.png")
+check_equilib_qual1 <- check_dominance_qual(df1, vars = vars_qual1, ncol = 3, png_path = "results/check_equilib_qual1.png")  # [n°24]
+check_equilib_qual2 <- check_dominance_qual(df1, vars = vars_qual2, ncol = 3, png_path = "results/check_equilib_qual2.png")  # [n°24]
+check_equilib_qual3 <- check_dominance_qual(df1, vars = vars_qual3, ncol = 3, png_path = "results/check_equilib_qual3.png")  # [n°24]
 
 
-# Commentaire (variables qualitatives) :
-# Toutes les variables qualitatives présentent une distribution équilibrée (seuil 95%),
-# à l'exception de deux variables présentant une dominance détectée :
-#   - pneu_tho  (pneumothorax)       : modalité "Non" dominante (~98%) — événement rare
-#   - chir_lser (chirurgie laser)    : modalité "Non" dominante (~97%) — événement rare
-# → Ces deux variables seront conservées dans l'analyse mais interprétées avec prudence
-#   en raison de leur manque de variabilité (effectifs très faibles dans la modalité "Oui").
+# Distribution équilibrée (seuil 95%) sauf 2 événements rares, conservés mais
+# à interpréter avec prudence : pneu_tho (~98% "Non"), chir_lser (~97% "Non")
 
 
 
@@ -330,14 +318,11 @@ vars_quant2 = c("somcu_int","somcu_vni","cortico_gene_doz")
 vars_quant3 = c("term_cal","pd_n","crib")
 
 ## Variables quantitatives
-check_vars_quant_value1 <- plot_range_check(df1, vars = vars_quant1, ncol = 3, png_path = "results/check_vars_quant_value1.png")
-check_vars_quant_value2 <- plot_range_check(df1, vars = vars_quant2, ncol = 3, png_path = "results/check_vars_quant_value2.png")
-check_vars_quant_value3 <- plot_range_check(df1, vars = vars_quant3, ncol = 3, png_path = "results/check_vars_quant_value3.png")
+check_vars_quant_value1 <- plot_range_check(df1, vars = vars_quant1, ncol = 3, png_path = "results/check_vars_quant_value1.png")  # [n°23]
+check_vars_quant_value2 <- plot_range_check(df1, vars = vars_quant2, ncol = 3, png_path = "results/check_vars_quant_value2.png")  # [n°23]
+check_vars_quant_value3 <- plot_range_check(df1, vars = vars_quant3, ncol = 3, png_path = "results/check_vars_quant_value3.png")  # [n°23]
 
 
-# Commentaire:
-# On a détecté quelques observations avec des valeurs assez écartées de la plage majoritaire.
-
-# Liste des variables pour lesquelles il y aurait des valeurs potentiellement aberrantes et/ou atypiques
-# (inspection au cas par cas : subset(check_vars_quant_value2$outliers_table, variable == "<nom_variable>"))
+# Quelques valeurs écartées de la plage majoritaire détectées.
+# Inspection au cas par cas : subset(check_vars_quant_value2$outliers_table, variable == "<nom_variable>")
 unique(check_vars_quant_value2$outliers_table$variable)

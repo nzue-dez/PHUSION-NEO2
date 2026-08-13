@@ -72,6 +72,7 @@ library(tibble)
 # ---------------------------
 # table_to_word : génération de tableaux Word avec statistiques
 # ---------------------------
+# [n°56]
 table_to_word <- function(
   df,
   group_var,
@@ -469,6 +470,7 @@ table_to_word <- function(
 #           file_path = "my_estimates.docx"
 #         )
 # ==============================================================
+# [n°57]
 export_estimates_table <- function(Variable,        # vecteur de noms de variables
                                    Estimate,        # vecteur d'estimations
                                    CI_Lower,        # vecteur bornes inférieures
@@ -589,6 +591,7 @@ export_estimates_table <- function(Variable,        # vecteur de noms de variabl
 #               subtitle = "Analyse logistique multivariée"
 #             )
 # ==============================================================
+# [n°58]
 export_decisionnel_logistique <- function(
   model,
   file_name = "rapport_decisionnel.docx",
@@ -812,6 +815,7 @@ export_decisionnel_logistique <- function(
 #
 ###############################################################################
 
+# [n°59]
 export_bootstrap_logistic <- function(
     boot_coef,
     original_model,
@@ -972,6 +976,7 @@ export_bootstrap_logistic <- function(
 if (!require(htmltools)) install.packages("htmltools")
 library(htmltools)
 
+# [n°60]
 kpi_card <- function(
     value,
     label,

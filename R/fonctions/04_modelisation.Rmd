@@ -101,6 +101,7 @@ library(glmnet)    # Elastic Net dans stability_selection
 # - Utile pour évaluer la performance de modèles de classification
 #   binaire
 # ------------------------------------------------------------------
+# [n°48]
 compute_metrics <- function(true, predicted) {
   # Forcer les deux niveaux "0"/"1" pour que la matrice soit toujours 2×2,
   # même si toutes les prédictions ou valeurs réelles sont d'une seule classe.
@@ -173,6 +174,7 @@ compute_metrics <- function(true, predicted) {
 # - Garantit que chaque fold contient approximativement la même proportion
 #   de classes que l’ensemble original
 # ------------------------------------------------------------------
+# [n°49]
 create_folds_stratified <- function(data, target, k = 5, seed = 123) {
   set.seed(seed)
   
@@ -246,6 +248,7 @@ create_folds_stratified <- function(data, target, k = 5, seed = 123) {
 #   d’entraînement et générer des prédictions sur un jeu de test
 # - Pour glm binomial, les prédictions sont des caractères "0"/"1"
 # ------------------------------------------------------------------
+# [n°50]
 predict_model <- function(model_type, formula, train_data, test_data, threshold = 0.5) {
   # Entraînement
   if (model_type == "glm") {
@@ -318,6 +321,7 @@ predict_model <- function(model_type, formula, train_data, test_data, threshold 
 # - Utile pour préparer les données avant entraînement de modèles
 #   de classification
 # ------------------------------------------------------------------
+# [n°51]
 split_train_test_stratified <- function(data, target, test_size = 0.2, seed = 123) {
   set.seed(seed)
   
@@ -400,6 +404,7 @@ split_train_test_stratified <- function(data, target, test_size = 0.2, seed = 12
 # - Garantit que chaque sous-jeu conserve la proportion originale des classes
 # - Utile pour l’entraînement, le tuning (validation) et l’évaluation finale
 # ------------------------------------------------------------------
+# [n°52]
 split_train_val_test <- function(data, target, test_size = 0.2, val_size = 0.2, seed = 123) {
   set.seed(seed)
   
@@ -489,6 +494,7 @@ split_train_val_test <- function(data, target, test_size = 0.2, val_size = 0.2, 
 # - Stratification utile pour les classes déséquilibrées
 # - Permet d’évaluer la performance modèle avec un tableau synthétique et exportable
 # ------------------------------------------------------------------
+# [n°53]
 run_cross_validation <- function(data, formula, family = binomial,
                                  k = 5, threshold = 0.5,
                                  title = "Performance du modèle par Fold",
@@ -602,6 +608,7 @@ run_cross_validation <- function(data, formula, family = binomial,
 # - Permet une visualisation simultanée des performances sur validation et test
 # ------------------------------------------------------------------
 # Dépendances : pROC, ggplot2
+# [n°54]
 plot_roc_val_test <- function(pred_val_out, pred_test_out,
                                            val_true, test_true,
                                            val_color = "skyblue",
@@ -737,6 +744,7 @@ plot_roc_val_test <- function(pred_val_out, pred_test_out,
 # (version flexible : bootstrap classique ou stratifié)
 # ------------------------------------------------------------------------------
 
+# [n°55]
 stability_selection <- function(
   data,
   formula,

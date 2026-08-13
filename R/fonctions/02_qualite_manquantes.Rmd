@@ -111,6 +111,7 @@ library(dplyr)
 library(flextable)
 library(officer)
 
+# [n°21]
 export_missing_data_table <- function(
     data,
     variable_labels = NULL,
@@ -232,6 +233,7 @@ export_missing_data_table <- function(
 # - Les graphiques sont adaptés pour des rapports ou dashboards
 # - La rotation des axes facilite la lecture des noms de variables
 # ------------------------------------------------------------------
+# [n°22]
 missing_plot <- function(
   df,
   vars = NULL,
@@ -466,6 +468,7 @@ missing_plot <- function(
 #     > 2 SD   → Très écarté
 # - Les identifiants des outliers sont dans $outliers_table, pas sur le graphique
 # ==============================================================================
+# [n°23]
 plot_range_check <- function(
   df,
   vars,
@@ -693,6 +696,7 @@ plot_range_check <- function(
 # - Utile avant tout modèle de régression, ML ou analyse de survie
 # - Complémentaire de table_to_word : ici focus sur la qualité des variables
 # ==============================================================================
+# [n°24]
 check_dominance_qual <- function(
   df,
   vars,
@@ -888,6 +892,7 @@ check_dominance_qual <- function(
 #
 # Dépendances : ggplot2, dplyr, tidyr, patchwork
 # ==============================================================================
+# [n°25]
 plot_missing_patterns <- function(
   df,
   vars        = NULL,
@@ -1089,6 +1094,7 @@ plot_missing_patterns <- function(
 #
 # Dépendances : ggplot2, patchwork, dplyr
 # ==============================================================================
+# [n°26]
 plot_missing_mar_explore <- function(
   df,
   target_vars,

@@ -54,7 +54,7 @@ library(glmnet)    # Elastic Net dans stability_selection
 
 ```{r}
 # ==============================================================
-# Fonction : flag_suicide_event
+# Fonction : flag_suicide_event  [n°61]
 # ==============================================================
 # Description :
 # Cette fonction crée un indicateur binaire (0/1) "suicide_event"
@@ -115,7 +115,7 @@ flag_suicide_event <- function(
 
 ```{r}
 # ==============================================================
-# Fonction : get_index_hospitalization
+# Fonction : get_index_hospitalization  [n°62]
 # ==============================================================
 # Description :
 # Cette fonction extrait, pour chaque patient, le premier séjour
@@ -185,7 +185,7 @@ get_index_hospitalization <- function(
 
 ```{r}
 # ==============================================================
-# Fonction : get_post_index_stays
+# Fonction : get_post_index_stays  [n°63]
 # ==============================================================
 # Description :
 # Cette fonction extrait, pour chaque patient, tous les séjours
@@ -284,6 +284,7 @@ get_post_index_stays <- function(
 #                     keep_vars = c("service", "diagnosis")
 #                   )
 # ==============================================================
+# [n°64]
 get_first_rehospitalisation <- function(
   post_index_data,
   patient_var = "id_patient",
@@ -353,6 +354,7 @@ get_first_rehospitalisation <- function(
 #                end_of_followup = "2025-12-31"
 #             )
 # ==============================================================
+# [n°65]
 build_survival_dataset <- function(
   index_data,
   first_event_data,
@@ -461,6 +463,7 @@ build_survival_dataset <- function(
 #   res$best_cut
 # ==============================================================
 
+# [n°66]
 find_best_cut_gray <- function(var, time, event, data){
 
   # Supprimer les NA

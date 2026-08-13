@@ -115,6 +115,7 @@ library(glmnet)    # Elastic Net dans stability_selection
 # - Les NA sont exclus des calculs statistiques mais comptabilisés
 # - Le format des résultats est textuel (prêt pour reporting)
 # ------------------------------------------------------------------
+# [n°27]
 descriptive_report <- function(df, vars, group_var = NULL,
                                      labels_list = NULL,
                                      word_path = "descriptifs.docx") {
@@ -269,6 +270,7 @@ descriptive_report <- function(df, vars, group_var = NULL,
 # - Les NA sont ignorés automatiquement par ggplot2
 # - Vérifier que le nombre de couleurs ≥ nombre de groupes
 # ------------------------------------------------------------------
+# [n°28]
 plot_density <- function(
   df,
   vars,
@@ -414,6 +416,7 @@ plot_density <- function(
 # - La variante "sharp" (net) est recommandée pour des distributions
 #   relativement concentrées (ex. mesures cliniques standardisées).
 # ------------------------------------------------------------------
+# [n°29]
 plot_density_sharp <- function(
   df,
   vars,
@@ -580,6 +583,7 @@ plot_density_sharp <- function(
 #   (QQ-plot, histogramme, densité)
 # - Les résultats sont concaténés sous forme textuelle pour chaque groupe
 # ------------------------------------------------------------------
+# [n°30]
 normality_report <- function(df, vars, group_var = NULL, labels_list = NULL, word_path = "rapport_normalite.docx") {
   
   results <- list()
@@ -709,6 +713,7 @@ normality_report <- function(df, vars, group_var = NULL, labels_list = NULL, wor
 # - Une forte déviation à la droite indique une non-normalité
 # - Adapter nrow/ncol pour améliorer la lisibilité si beaucoup de graphiques
 # ------------------------------------------------------------------
+# [n°31]
 qqplots_graph <- function(
   df,
   vars,
@@ -879,6 +884,7 @@ qqplots_graph <- function(
 # - Les résultats doivent être interprétés conjointement avec les tests
 #   de normalité (ex : Shapiro) et les diagnostics graphiques
 # ------------------------------------------------------------------
+# [n°32]
 homogeneity_report <- function(df, vars, group_var = NULL, labels_list = NULL, word_path = "rapport_homogeneite.docx") {
   
   results <- list()
@@ -1015,6 +1021,7 @@ homogeneity_report <- function(df, vars, group_var = NULL, labels_list = NULL, w
 #   préalablement déterminés (ex : via normality_report et
 #   homogeneity_report)
 # ------------------------------------------------------------------
+# [n°33]
 apply_tests_by_group <- function(data, group, var_groups, tests_choices) {
   
   g <- as.factor(data[[group]])
@@ -1124,6 +1131,7 @@ apply_tests_by_group <- function(data, group, var_groups, tests_choices) {
 # - Le format est adapté à des tableaux (publication/reporting)
 # - Utile pour automatiser la création de tableaux descriptifs
 # ------------------------------------------------------------------
+# [n°34]
 stat_quant_full <- function(x, stats = c("median_iqr", "min_max", "mean_sd", "na")) {
   res <- list()
   
@@ -1197,6 +1205,7 @@ stat_quant_full <- function(x, stats = c("median_iqr", "min_max", "mean_sd", "na
 # - Les effectifs attendus doivent généralement être ≥ 5 pour la validité
 #   du test du Chi²
 # ------------------------------------------------------------------
+# [n°35]
 calc_expected <- function(tbl) {
   tbl <- as.matrix(tbl)
   row_sums <- rowSums(tbl)
@@ -1247,6 +1256,7 @@ calc_expected <- function(tbl) {
 # - Utile pour automatiser le choix du test d’indépendance dans
 #   les analyses de variables catégorielles
 # ------------------------------------------------------------------
+# [n°36]
 choose_independence_test <- function(tbl) {
   expected <- calc_expected(tbl)
   prop_ge5 <- mean(expected >= 5)
@@ -1320,6 +1330,7 @@ choose_independence_test <- function(tbl) {
 # - Utile pour le diagnostic des variables numériques avant analyse
 # - Les numéros d’observation facilitent la localisation des valeurs extrêmes
 # ------------------------------------------------------------------
+# [n°37]
 plot_box_points <- function(
   df,
   x_var = NULL,
@@ -1476,6 +1487,7 @@ plot_box_points <- function(
 #
 # Auteur : [D. KOUADIO]
 # ------------------------------------------------------------
+# [n°38]
 plot_scatter_pairs <- function(df, vars, 
                                point_color = "darkred",
                                line_color = "blue",
@@ -1623,6 +1635,7 @@ plot_scatter_pairs <- function(df, vars,
 ##########################################################################################################################
 # Fonction pour étudier la corrélation ou le lien monotone entre un groupe de variables quantitatives et avec d'autres variables cibles
 #/ Commme la fonction (19) sauf que, cette fois, c'est le lien entre des variables quantitatives et certaines autres variables fixées (et non deux à deux).
+# [n°39]
 plot_corr_group_to_targets <- function(df,
                                        group_vars,
                                        target_vars,
@@ -1761,6 +1774,7 @@ plot_corr_group_to_targets <- function(df,
 # Dépendances :
 # - ggplot2, cowplot (pour la sauvegarde paginée)
 # ------------------------------------------------------------------
+# [n°40]
 plot_corr_group_to_targets2 <- function(df,
                                        group_vars,
                                        target_vars,
@@ -1906,6 +1920,7 @@ plot_corr_group_to_targets2 <- function(df,
 #   entre variables quantitatives
 # - Les coefficients et p-values sont arrondis pour lisibilité
 # ------------------------------------------------------------------
+# [n°41]
 correlation_table <- function(df, vars, method = c("pearson", "spearman")) {
   
   method <- match.arg(method)
@@ -1976,6 +1991,7 @@ correlation_table <- function(df, vars, method = c("pearson", "spearman")) {
 # Exemple :
 # stat_quant(c(10, 20, 30, 40, 50))  →  "30 (17.5–42.5)"
 # ------------------------------------------------------------------
+# [n°42]
 stat_quant <- function(x){
   if(all(is.na(x))) return("")
   med <- round(median(x, na.rm = TRUE), 1)
@@ -2006,6 +2022,7 @@ stat_quant <- function(x){
 # →  Non          Oui
 #    "1 (25%)"    "3 (75%)"
 # ------------------------------------------------------------------
+# [n°43]
 stat_qual <- function(x){
   x <- x[!is.na(x)]                          # exclure les NA avant tout
   if (length(x) == 0) return(character(0))   # vecteur vide ou tout NA → retour propre
@@ -2053,6 +2070,7 @@ stat_qual <- function(x){
 # - Format attendu des colonnes : <visite><sep><variable> (ex. "v1_poids")
 # - Voir plot_evolutive2/3/4 pour des versions avec groupes et statistiques.
 # ------------------------------------------------------------------
+# [n°44]
 plot_evolutive <- function(data,
                            vars,
                            labels_vars = vars,
@@ -2193,6 +2211,7 @@ plot_evolutive <- function(data,
 # Dépendances :
 # - ggplot2, reshape2, dplyr, cowplot
 # ------------------------------------------------------------------
+# [n°45]
 plot_evolutive2 <- function(data,
                            vars,
                            labels_vars = vars,
@@ -2342,7 +2361,7 @@ plot_evolutive2 <- function(data,
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : plot_evolutive3
+# Fonction : plot_evolutive3  [n°46]
 # ------------------------------------------------------------------
 # Description :
 # Version améliorée de plot_evolutive2 avec :
@@ -2542,7 +2561,7 @@ plot_evolutive3 <- function(data,
 
 ```{r}
 # ------------------------------------------------------------------
-# Fonction : plot_evolutive4
+# Fonction : plot_evolutive4  [n°47]
 # ------------------------------------------------------------------
 # Description :
 # Version finale et la plus robuste de plot_evolutive. Par rapport à

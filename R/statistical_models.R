@@ -3,11 +3,9 @@
 # Modèles statistiques (régression logistique, linéaire, mixtes...)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Etude de corrélation entre les variables quantitatives de la base
-# NB : plot_correlation()/save_correlation_grid() (R/plot_helpers.R) affichent
-# proprement le coefficient et la p-value sur chaque graphique, et permettent
-# de choisir le test (method = "pearson" ou "spearman"), le lissage
-# (smooth = "linear" ou "loess"), les couleurs, la position de l'encart, etc.
+# Corrélations entre variables quantitatives
+# save_correlation_grid()/plot_correlation() (R/plot_helpers.R) : coefficient
+# + p-value affichés sur le graphique, test/lissage/couleurs personnalisables
 corr_labels <- list(
   term_cal = "GA at birth (weeks)",
   pd_n     = "Birthweight (g)",
@@ -28,8 +26,8 @@ save_correlation_grid(df1, pairs = list(c("pd_n", "crib")), labels = corr_labels
 
 
 
-#---------------------------------------------------------- Analyse univariée -------------------------------------------------------------------------
-## Tableau 3 (variables quantitatives + qualitatives fusionnées en un seul tableau)
+# Analyse univariée -----------------------------------------------------
+## Tableau 3 (quantitatives + qualitatives fusionnées)
 
 lab_quant3 <- list(
   term_cal = "GA at birth (weeks)",
@@ -59,17 +57,13 @@ export_flextable_docx(tab3, "Tableau 3 — Analyse univariée des facteurs assoc
 
 
 
-#---------------------------------------------------- Construction du modèle multivarié -------------------------------------------------------------
+# Modèle multivarié ------------------------------------------------------
 modlog1 <- glm(Surv_without_dbp36sa ~ term_cal + sex + gr_mult + rpde + rciu + nb_surf + periode,
                data = df1, family = binomial(link = "logit"))
 
+summary(modlog1)  # Effets ajustés
 
-
-# ----------------------------------------------------- Estimation des effets ajustés --------------------------------------------------------------
-summary(modlog1)
-
-
-# ---------------------------------------------------------- Extraction des résultats ---------------------------------------------------------------
+# Extraction des résultats
 res <- tidy(modlog1, exponentiate = TRUE, conf.int = TRUE) %>%
   filter(term != "(Intercept)")
 
@@ -85,7 +79,7 @@ res <- res %>%
                               "periodeRestrictive prophylaxis period" = "Prophylaxis period: Restrictive"
   ))
 
-# ---------------------------------------------------------- Tableau 4 (ORa) au même style que les tableaux descriptifs ------------------------------
+# Tableau 4 (ORa), même style que les tableaux descriptifs
 group_defs_model <- list(
   "Âge gestationnel (par semaine)" = list(type = "continuous", term = "Gestational age (weeks)"),
   "Sexe" = list(type = "factor", ref = "Homme",

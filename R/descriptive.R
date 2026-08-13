@@ -4,10 +4,8 @@
 # Tableau 1 : caractéristiques générales + comparaisons entre groupes
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Tableau 1 (variables quantitatives)
-# NB : le choix moyenne(ET) vs médiane(EIQ) et du test associé (Student vs
-# Wilcoxon) est fait automatiquement par variable selon la normalité
-# (Shapiro-Wilk) via merged_desc_table() -- voir R/table_helpers.R.
+# Tableau 1 (quantitatives) — moyenne/médiane et test choisis automatiquement
+# par normalité (Shapiro-Wilk) via merged_desc_table(), cf. R/table_helpers.R
 lab_quant1 <- list(
   term_cal = "GA at birth (weeks)",
   pd_n     = "Birthweight (g)",
@@ -45,7 +43,7 @@ export_flextable_docx(tab1_qual, "Tableau 1b — Caractéristiques qualitatives"
                        "results/Tableau1_qual.docx")
 
 
-# Tableau 2 (variables quantitatives + qualitatives fusionnées en un seul tableau)
+# Tableau 2 (quantitatives + qualitatives fusionnées)
 lab_quant2 <- list(
   somcu_int        = "Cumulated duration of invasive ventilation (d)",
   somcu_vni        = "Cumulated duration of non-invasive ventilation (d)",
